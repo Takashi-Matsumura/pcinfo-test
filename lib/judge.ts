@@ -69,14 +69,55 @@ const CATEGORY_LABEL: Record<Category, string> = {
   security: "セキュリティ",
 };
 
+export interface UserIgnore {
+  interfaces?: string[];
+  services?: string[];
+  diskMounts?: string[];
+  smartDevices?: string[];
+  pingTargets?: string[];
+  dnsHosts?: string[];
+}
+
 export interface SummarizeInput {
   basic: BasicResources;
   health?: HardwareNetwork;
   services?: CollectorResult<ServiceState[]>;
+  userIgnore?: UserIgnore;
 }
 
-export function summarize({ basic, health, services }: SummarizeInput): SummaryResult {
+export function summarize({
+  basic,
+  health,
+  services,
+  userIgnore,
+}: SummarizeInput): SummaryResult {
   const t = monitorConfig.thresholds;
+  const ignore = {
+    interfaces: [
+      ...monitorConfig.ignore.interfaces,
+      ...(userIgnore?.interfaces ?? []),
+    ],
+    services: [
+      ...monitorConfig.ignore.services,
+      ...(userIgnore?.services ?? []),
+    ],
+    diskMounts: [
+      ...monitorConfig.ignore.diskMounts,
+      ...(userIgnore?.diskMounts ?? []),
+    ],
+    smartDevices: [
+      ...monitorConfig.ignore.smartDevices,
+      ...(userIgnore?.smartDevices ?? []),
+    ],
+    pingTargets: [
+      ...monitorConfig.ignore.pingTargets,
+      ...(userIgnore?.pingTargets ?? []),
+    ],
+    dnsHosts: [
+      ...monitorConfig.ignore.dnsHosts,
+      ...(userIgnore?.dnsHosts ?? []),
+    ],
+  };
   const mkBucket = (category: Category): CategoryFinding => ({
     category,
     severity: "ok",
@@ -125,7 +166,7 @@ export function summarize({ basic, health, services }: SummarizeInput): SummaryR
   }
   if (basic.disk.ok) {
     for (const d of basic.disk.value) {
-      if (monitorConfig.ignore.diskMounts.includes(d.mount)) continue;
+      if (ignore.diskMounts.includes(d.mount)) continue;
       const p = d.usagePercent;
       if (p >= t.diskPercent.critical)
         note("software", "critical", `ディスク ${d.mount} ${p.toFixed(0)}%`);
@@ -135,7 +176,7 @@ export function summarize({ basic, health, services }: SummarizeInput): SummaryR
   }
   if (basic.netLink.ok) {
     for (const n of basic.netLink.value) {
-      if (monitorConfig.ignore.interfaces.includes(n.name)) continue;
+      if (ignore.interfaces.includes(n.name)) continue;
       if (n.operstate === "down" || n.carrier === 0) {
         note("hardware", "warn", `NIC ${n.name} リンク無し`);
         note("network", "warn", `NIC ${n.name} リンク無し`);
@@ -163,7 +204,7 @@ export function summarize({ basic, health, services }: SummarizeInput): SummaryR
     }
     if (health.smart.ok) {
       for (const s of health.smart.value) {
-        if (monitorConfig.ignore.smartDevices.includes(s.device)) continue;
+        if (ignore.smartDevices.includes(s.device)) continue;
         if (!s.passed) note("hardware", "critical", `SMART ${s.device} ${s.status}`);
       }
     }
@@ -172,7 +213,7 @@ export function summarize({ basic, health, services }: SummarizeInput): SummaryR
     }
     if (health.dns.ok) {
       const failed = health.dns.value.filter(
-        (d) => !d.ok && !monitorConfig.ignore.dnsHosts.includes(d.host),
+        (d) => !d.ok && !ignore.dnsHosts.includes(d.host),
       );
       if (failed.length > 0) {
         note("network", "warn", `DNS 失敗 ${failed.map((d) => d.host).join(", ")}`);
@@ -180,7 +221,7 @@ export function summarize({ basic, health, services }: SummarizeInput): SummaryR
     }
     if (health.ping.ok) {
       const failed = health.ping.value.filter(
-        (p) => !p.ok && !monitorConfig.ignore.pingTargets.includes(p.name),
+        (p) => !p.ok && !ignore.pingTargets.includes(p.name),
       );
       if (failed.length > 0) {
         note("network", "warn", `ping 失敗 ${failed.map((p) => p.name).join(", ")}`);
@@ -199,7 +240,7 @@ export function summarize({ basic, health, services }: SummarizeInput): SummaryR
   // ----- services -----
   if (services?.ok) {
     for (const s of services.value) {
-      if (monitorConfig.ignore.services.includes(s.unit)) continue;
+      if (ignore.services.includes(s.unit)) continue;
       if (s.active !== "active") {
         const sev: Severity = s.active === "failed" ? "critical" : "warn";
         note("software", sev, `${s.unit} → ${s.active}`);

@@ -1,4 +1,49 @@
+"use client";
 import type { Severity } from "@/lib/types";
+import type { MuteCategory } from "@/app/hooks/useMuteList";
+
+function MuteSwitch({
+  checked,
+  disabled,
+  onToggle,
+  title,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  onToggle?: () => void;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label="監視除外（ミュート）切替"
+      disabled={disabled}
+      onClick={onToggle}
+      title={title}
+      className={`inline-flex items-center ${
+        disabled ? "cursor-not-allowed" : "cursor-pointer"
+      }`}
+    >
+      <span
+        className={`relative inline-block h-4 w-7 rounded-full transition-colors ${
+          checked
+            ? disabled
+              ? "bg-zinc-400 dark:bg-zinc-600"
+              : "bg-amber-500"
+            : "bg-zinc-300 dark:bg-zinc-700"
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow-sm transition-all ${
+            checked ? "left-3.5" : "left-0.5"
+          }`}
+        />
+      </span>
+    </button>
+  );
+}
 
 const sevStyle: Record<Severity, { dot: string; label: string; icon: string; row: string }> = {
   ok: {
@@ -35,16 +80,21 @@ export interface StatusRow {
   secondary?: string;
   hint?: string;
   muted?: boolean;
+  muteCategory?: MuteCategory;
+  muteKey?: string;
+  muteOrigin?: "config" | "user";
 }
 
 export function StatusTable({
   title,
   rows,
   emptyMessage,
+  onToggleMute,
 }: {
   title: string;
   rows: StatusRow[];
   emptyMessage?: string;
+  onToggleMute?: (cat: MuteCategory, key: string) => void;
 }) {
   return (
     <section className="space-y-2">
@@ -60,12 +110,15 @@ export function StatusTable({
               <th className="px-3 py-2 font-medium whitespace-nowrap">値</th>
               <th className="px-3 py-2 font-medium whitespace-nowrap">補足</th>
               <th className="px-3 py-2 font-medium whitespace-nowrap">ヒント</th>
+              <th className="px-3 py-2 font-medium whitespace-nowrap w-[80px] text-right">
+                ミュート
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800 bg-white dark:bg-zinc-950">
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-3 py-3 text-center text-zinc-500 dark:text-zinc-400">
+                <td colSpan={6} className="px-3 py-3 text-center text-zinc-500 dark:text-zinc-400">
                   {emptyMessage ?? "読み込み中…"}
                 </td>
               </tr>
@@ -74,6 +127,7 @@ export function StatusTable({
                 const s = sevStyle[r.severity];
                 const dim = r.muted ? "opacity-60" : "";
                 const rowBg = r.muted ? "" : s.row;
+                const canToggle = !!(r.muteCategory && r.muteKey && onToggleMute);
                 return (
                   <tr key={r.id} className={`align-top ${rowBg} ${dim}`}>
                     <td className="px-3 py-2 whitespace-nowrap">
@@ -112,6 +166,25 @@ export function StatusTable({
                     </td>
                     <td className="px-3 py-2 text-zinc-500 dark:text-zinc-400 leading-relaxed">
                       {r.hint ?? "—"}
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap text-right">
+                      {!canToggle ? (
+                        <span className="text-xs text-zinc-400 dark:text-zinc-600">—</span>
+                      ) : r.muteOrigin === "config" ? (
+                        <MuteSwitch
+                          checked
+                          disabled
+                          title="config/monitor.ts で除外設定済み"
+                        />
+                      ) : (
+                        <MuteSwitch
+                          checked={r.muteOrigin === "user"}
+                          onToggle={() => onToggleMute?.(r.muteCategory!, r.muteKey!)}
+                          title={
+                            r.muteOrigin === "user" ? "クリックで監視を再開" : "クリックでミュート"
+                          }
+                        />
+                      )}
                     </td>
                   </tr>
                 );
