@@ -141,13 +141,17 @@ function buildBasicCards(data: StatusResponse): StatusRow[] {
       });
     } else {
       disk.value.forEach((d) => {
+        const muted = monitorConfig.ignore.diskMounts.includes(d.mount);
         cards.push({
           id: `disk-${d.mount}`,
           title: `ディスク ${d.mount}`,
-          severity: sevByPercent(d.usagePercent, t.diskPercent.warn, t.diskPercent.critical),
+          severity: muted
+            ? "unknown"
+            : sevByPercent(d.usagePercent, t.diskPercent.warn, t.diskPercent.critical),
           primary: `${d.usagePercent.toFixed(0)} %`,
           secondary: `${fmtBytes(d.usedBytes)} / ${fmtBytes(d.totalBytes)}（${d.device}）`,
           hint: "満杯間際だとログ書き込みやアップデートが失敗してアプリが落ちる原因に。",
+          muted,
         });
       });
     }
@@ -163,8 +167,10 @@ function buildBasicCards(data: StatusResponse): StatusRow[] {
 
   if (netLink.ok) {
     netLink.value.forEach((n) => {
-      const severity: Severity =
-        n.operstate === "up" && n.carrier === 1
+      const muted = monitorConfig.ignore.interfaces.includes(n.name);
+      const severity: Severity = muted
+        ? "unknown"
+        : n.operstate === "up" && n.carrier === 1
           ? "ok"
           : n.operstate === "down" || n.carrier === 0
             ? "critical"
@@ -181,6 +187,7 @@ function buildBasicCards(data: StatusResponse): StatusRow[] {
               : "キャリア無し",
         secondary: n.speedMbps ? `${n.speedMbps} Mbps` : undefined,
         hint: "ケーブル抜け／HUB 故障／NIC 故障の可能性。LAN ポートの LED と合わせて確認。",
+        muted,
       });
     });
   } else {
@@ -265,13 +272,15 @@ function buildHardwareCards(h: HealthResponse): StatusRow[] {
       });
     } else {
       smart.value.forEach((s) => {
+        const muted = monitorConfig.ignore.smartDevices.includes(s.device);
         cards.push({
           id: `smart-${s.device}`,
           title: `SMART ${s.device}`,
-          severity: s.passed ? "ok" : "critical",
+          severity: muted ? "unknown" : s.passed ? "ok" : "critical",
           primary: s.status,
           secondary: s.tempC !== null ? `温度 ${s.tempC} ℃` : undefined,
           hint: "FAILED / 不明 はディスク故障の前兆。早急にバックアップと交換準備を。",
+          muted,
         });
       });
     }
@@ -313,14 +322,22 @@ function buildNetworkCards(h: HealthResponse): StatusRow[] {
   }
 
   if (dns.ok) {
-    const failed = dns.value.filter((d) => !d.ok);
+    const ignored = monitorConfig.ignore.dnsHosts;
+    const considered = dns.value.filter((d) => !ignored.includes(d.host));
+    const failed = considered.filter((d) => !d.ok);
     cards.push({
       id: "dns",
       title: "DNS 解決",
       severity: failed.length === 0 ? "ok" : "warn",
-      primary: failed.length === 0 ? `${dns.value.length} 件すべて成功` : `${failed.length} 件失敗`,
+      primary:
+        failed.length === 0
+          ? `${considered.length} 件すべて成功`
+          : `${failed.length} 件失敗`,
       secondary: dns.value
-        .map((d) => `${d.host} ${d.ok ? "✓" : "✗"}`)
+        .map((d) => {
+          const mark = d.ok ? "✓" : "✗";
+          return ignored.includes(d.host) ? `${d.host} (除外)` : `${d.host} ${mark}`;
+        })
         .join(" / "),
       hint: "DNS だけ失敗するなら resolv.conf / 上流 DNS の問題。",
     });
@@ -336,13 +353,15 @@ function buildNetworkCards(h: HealthResponse): StatusRow[] {
 
   if (ping.ok) {
     ping.value.forEach((p) => {
+      const muted = monitorConfig.ignore.pingTargets.includes(p.name);
       cards.push({
         id: `ping-${p.name}`,
         title: `ping ${p.name}`,
-        severity: p.ok ? "ok" : "warn",
+        severity: muted ? "unknown" : p.ok ? "ok" : "warn",
         primary: p.ok ? `${p.rttMs?.toFixed(1) ?? "?"} ms` : "応答なし",
         secondary: p.host ?? "宛先未解決",
         hint: "GW のみ NG → ローカル網／NIC、外部のみ NG → ISP・ルータ側を疑います。",
+        muted,
       });
     });
   } else {
@@ -432,21 +451,27 @@ function buildServiceCards(s: ServicesResponse): StatusRow[] {
       },
     ];
   }
-  return s.services.value.map((u) => ({
-    id: `svc-${u.unit}`,
-    title: u.unit,
-    severity:
-      u.active === "active"
+  return s.services.value.map((u) => {
+    const muted = monitorConfig.ignore.services.includes(u.unit);
+    const severity: Severity = muted
+      ? "unknown"
+      : u.active === "active"
         ? "ok"
         : u.active === "failed"
           ? "critical"
-          : ("warn" as Severity),
-    primary: u.active,
-    hint:
-      u.active === "active"
-        ? undefined
-        : "サービス停止／起動失敗。ソフト側の典型的な障害。`systemctl status <unit>` で詳細確認。",
-  }));
+          : "warn";
+    return {
+      id: `svc-${u.unit}`,
+      title: u.unit,
+      severity,
+      primary: u.active,
+      hint:
+        u.active === "active"
+          ? undefined
+          : "サービス停止／起動失敗。ソフト側の典型的な障害。`systemctl status <unit>` で詳細確認。",
+      muted,
+    };
+  });
 }
 
 interface PollState<T> {

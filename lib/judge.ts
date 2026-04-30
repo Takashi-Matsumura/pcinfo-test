@@ -125,6 +125,7 @@ export function summarize({ basic, health, services }: SummarizeInput): SummaryR
   }
   if (basic.disk.ok) {
     for (const d of basic.disk.value) {
+      if (monitorConfig.ignore.diskMounts.includes(d.mount)) continue;
       const p = d.usagePercent;
       if (p >= t.diskPercent.critical)
         note("software", "critical", `ディスク ${d.mount} ${p.toFixed(0)}%`);
@@ -134,6 +135,7 @@ export function summarize({ basic, health, services }: SummarizeInput): SummaryR
   }
   if (basic.netLink.ok) {
     for (const n of basic.netLink.value) {
+      if (monitorConfig.ignore.interfaces.includes(n.name)) continue;
       if (n.operstate === "down" || n.carrier === 0) {
         note("hardware", "warn", `NIC ${n.name} リンク無し`);
         note("network", "warn", `NIC ${n.name} リンク無し`);
@@ -161,6 +163,7 @@ export function summarize({ basic, health, services }: SummarizeInput): SummaryR
     }
     if (health.smart.ok) {
       for (const s of health.smart.value) {
+        if (monitorConfig.ignore.smartDevices.includes(s.device)) continue;
         if (!s.passed) note("hardware", "critical", `SMART ${s.device} ${s.status}`);
       }
     }
@@ -168,13 +171,17 @@ export function summarize({ basic, health, services }: SummarizeInput): SummaryR
       note("network", "warn", "デフォルト GW 未取得");
     }
     if (health.dns.ok) {
-      const failed = health.dns.value.filter((d) => !d.ok);
+      const failed = health.dns.value.filter(
+        (d) => !d.ok && !monitorConfig.ignore.dnsHosts.includes(d.host),
+      );
       if (failed.length > 0) {
         note("network", "warn", `DNS 失敗 ${failed.map((d) => d.host).join(", ")}`);
       }
     }
     if (health.ping.ok) {
-      const failed = health.ping.value.filter((p) => !p.ok);
+      const failed = health.ping.value.filter(
+        (p) => !p.ok && !monitorConfig.ignore.pingTargets.includes(p.name),
+      );
       if (failed.length > 0) {
         note("network", "warn", `ping 失敗 ${failed.map((p) => p.name).join(", ")}`);
       }
@@ -192,6 +199,7 @@ export function summarize({ basic, health, services }: SummarizeInput): SummaryR
   // ----- services -----
   if (services?.ok) {
     for (const s of services.value) {
+      if (monitorConfig.ignore.services.includes(s.unit)) continue;
       if (s.active !== "active") {
         const sev: Severity = s.active === "failed" ? "critical" : "warn";
         note("software", sev, `${s.unit} → ${s.active}`);
