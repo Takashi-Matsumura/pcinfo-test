@@ -1,7 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { StatusCard } from "./StatusCard";
-import { Section } from "./Section";
+import { StatusTable, type StatusRow } from "./StatusTable";
 import { PlainSummary } from "./PlainSummary";
 import { LogPanel } from "./LogPanel";
 import { monitorConfig } from "@/config/monitor";
@@ -41,17 +40,8 @@ function sevByPercent(p: number, warn: number, crit: number): Severity {
   return "ok";
 }
 
-interface CardSpec {
-  id: string;
-  title: string;
-  sev: Severity;
-  primary: string;
-  secondary?: string;
-  hint?: string;
-}
-
-function buildBasicCards(data: StatusResponse): CardSpec[] {
-  const cards: CardSpec[] = [];
+function buildBasicCards(data: StatusResponse): StatusRow[] {
+  const cards: StatusRow[] = [];
   const t = monitorConfig.thresholds;
   const { cpu, mem, load, uptime, disk, netLink } = data.basic;
 
@@ -60,7 +50,7 @@ function buildBasicCards(data: StatusResponse): CardSpec[] {
       ? {
           id: "cpu",
           title: "CPU 使用率",
-          sev: sevByPercent(cpu.value.usagePercent, t.cpuPercent.warn, t.cpuPercent.critical),
+          severity: sevByPercent(cpu.value.usagePercent, t.cpuPercent.warn, t.cpuPercent.critical),
           primary: `${cpu.value.usagePercent.toFixed(1)} %`,
           secondary: `論理コア ${cpu.value.cores}`,
           hint: "高止まりが続く場合、過負荷プロセス（ソフト）か発熱による熱抑制（ハード）を疑います。",
@@ -68,7 +58,7 @@ function buildBasicCards(data: StatusResponse): CardSpec[] {
       : {
           id: "cpu",
           title: "CPU 使用率",
-          sev: "unknown",
+          severity: "unknown",
           primary: "取得不可",
           secondary: cpu.error,
         },
@@ -79,7 +69,7 @@ function buildBasicCards(data: StatusResponse): CardSpec[] {
       ? {
           id: "mem",
           title: "メモリ",
-          sev: sevByPercent(mem.value.usagePercent, t.memPercent.warn, t.memPercent.critical),
+          severity: sevByPercent(mem.value.usagePercent, t.memPercent.warn, t.memPercent.critical),
           primary: `${mem.value.usagePercent.toFixed(0)} %`,
           secondary: `${fmtBytes(mem.value.usedBytes)} / ${fmtBytes(mem.value.totalBytes)}`,
           hint: "使用率が高止まりするとアプリが OOM で停止することがあります。",
@@ -87,7 +77,7 @@ function buildBasicCards(data: StatusResponse): CardSpec[] {
       : {
           id: "mem",
           title: "メモリ",
-          sev: "unknown",
+          severity: "unknown",
           primary: "取得不可",
           secondary: mem.error,
         },
@@ -96,7 +86,7 @@ function buildBasicCards(data: StatusResponse): CardSpec[] {
   if (load.ok) {
     const cores = Math.max(1, load.value.cores);
     const perCore = load.value["1m"] / cores;
-    const sev: Severity =
+    const severity: Severity =
       perCore >= t.loadPerCore.critical
         ? "critical"
         : perCore >= t.loadPerCore.warn
@@ -105,7 +95,7 @@ function buildBasicCards(data: StatusResponse): CardSpec[] {
     cards.push({
       id: "load",
       title: "ロードアベレージ",
-      sev,
+      severity,
       primary: `${load.value["1m"].toFixed(2)} / ${load.value["5m"].toFixed(2)} / ${load.value["15m"].toFixed(2)}`,
       secondary: `1コア当たり ${perCore.toFixed(2)}（cores=${cores}）`,
       hint: "コア数を超えると待ち行列が伸びている合図。CPU 律速か I/O 律速かは別途確認。",
@@ -114,7 +104,7 @@ function buildBasicCards(data: StatusResponse): CardSpec[] {
     cards.push({
       id: "load",
       title: "ロードアベレージ",
-      sev: "unknown",
+      severity: "unknown",
       primary: "取得不可",
       secondary: load.error,
     });
@@ -125,7 +115,7 @@ function buildBasicCards(data: StatusResponse): CardSpec[] {
     cards.push({
       id: "uptime",
       title: "アップタイム",
-      sev: "ok",
+      severity: "ok",
       primary: fmtUptime(uptime.value.uptimeSeconds),
       secondary: `起動 ${boot}`,
       hint: "意図しない再起動の有無を運用記録と照合してください。",
@@ -134,7 +124,7 @@ function buildBasicCards(data: StatusResponse): CardSpec[] {
     cards.push({
       id: "uptime",
       title: "アップタイム",
-      sev: "unknown",
+      severity: "unknown",
       primary: "取得不可",
       secondary: uptime.error,
     });
@@ -145,7 +135,7 @@ function buildBasicCards(data: StatusResponse): CardSpec[] {
       cards.push({
         id: "disk",
         title: "ディスク",
-        sev: "unknown",
+        severity: "unknown",
         primary: "対象なし",
         secondary: "df の出力が空でした",
       });
@@ -154,7 +144,7 @@ function buildBasicCards(data: StatusResponse): CardSpec[] {
         cards.push({
           id: `disk-${d.mount}`,
           title: `ディスク ${d.mount}`,
-          sev: sevByPercent(d.usagePercent, t.diskPercent.warn, t.diskPercent.critical),
+          severity: sevByPercent(d.usagePercent, t.diskPercent.warn, t.diskPercent.critical),
           primary: `${d.usagePercent.toFixed(0)} %`,
           secondary: `${fmtBytes(d.usedBytes)} / ${fmtBytes(d.totalBytes)}（${d.device}）`,
           hint: "満杯間際だとログ書き込みやアップデートが失敗してアプリが落ちる原因に。",
@@ -165,7 +155,7 @@ function buildBasicCards(data: StatusResponse): CardSpec[] {
     cards.push({
       id: "disk",
       title: "ディスク",
-      sev: "unknown",
+      severity: "unknown",
       primary: "取得不可",
       secondary: disk.error,
     });
@@ -173,7 +163,7 @@ function buildBasicCards(data: StatusResponse): CardSpec[] {
 
   if (netLink.ok) {
     netLink.value.forEach((n) => {
-      const sev: Severity =
+      const severity: Severity =
         n.operstate === "up" && n.carrier === 1
           ? "ok"
           : n.operstate === "down" || n.carrier === 0
@@ -182,7 +172,7 @@ function buildBasicCards(data: StatusResponse): CardSpec[] {
       cards.push({
         id: `nic-${n.name}`,
         title: `NIC ${n.name}`,
-        sev,
+        severity,
         primary:
           n.operstate === "up" && n.carrier === 1
             ? "リンクアップ"
@@ -197,7 +187,7 @@ function buildBasicCards(data: StatusResponse): CardSpec[] {
     cards.push({
       id: "nic",
       title: "NIC リンク",
-      sev: "unknown",
+      severity: "unknown",
       primary: "取得不可",
       secondary: netLink.error,
     });
@@ -205,16 +195,16 @@ function buildBasicCards(data: StatusResponse): CardSpec[] {
   return cards;
 }
 
-function buildHardwareCards(h: HealthResponse): CardSpec[] {
+function buildHardwareCards(h: HealthResponse): StatusRow[] {
   const t = monitorConfig.thresholds;
-  const cards: CardSpec[] = [];
+  const cards: StatusRow[] = [];
   const { sensors, smart } = h.health;
 
   if (sensors.ok) {
     const v = sensors.value;
     if (v.thermalPressure) {
       const tp = v.thermalPressure;
-      const sev: Severity =
+      const severity: Severity =
         tp.cpuSpeedLimit < t.cpuSpeedLimit.critical
           ? "critical"
           : tp.cpuSpeedLimit < t.cpuSpeedLimit.warn
@@ -223,7 +213,7 @@ function buildHardwareCards(h: HealthResponse): CardSpec[] {
       cards.push({
         id: "thermal-pressure",
         title: "熱状態（CPU 速度制限）",
-        sev,
+        severity,
         primary: `${tp.cpuSpeedLimit} %`,
         secondary: tp.note,
         hint: "100% 未満は熱抑制中。ファン詰まり／吸排気の塞ぎ／室温／粉塵を確認。",
@@ -231,12 +221,12 @@ function buildHardwareCards(h: HealthResponse): CardSpec[] {
     }
     if (v.maxTempC !== null) {
       const max = v.maxTempC;
-      const sev: Severity =
+      const severity: Severity =
         max >= t.tempC.critical ? "critical" : max >= t.tempC.warn ? "warn" : "ok";
       cards.push({
         id: "temp",
         title: "温度（最大値）",
-        sev,
+        severity,
         primary: `${max.toFixed(0)} ℃`,
         secondary: v.readings
           .slice(0, 3)
@@ -249,7 +239,7 @@ function buildHardwareCards(h: HealthResponse): CardSpec[] {
       cards.push({
         id: "temp",
         title: "温度／熱状態",
-        sev: "unknown",
+        severity: "unknown",
         primary: "対象なし",
         secondary: "センサ情報を取得できませんでした",
       });
@@ -258,7 +248,7 @@ function buildHardwareCards(h: HealthResponse): CardSpec[] {
     cards.push({
       id: "temp",
       title: "温度／熱状態",
-      sev: "unknown",
+      severity: "unknown",
       primary: sensors.reason === "not-installed" ? "コマンド未インストール" : "取得不可",
       secondary: sensors.error,
     });
@@ -269,7 +259,7 @@ function buildHardwareCards(h: HealthResponse): CardSpec[] {
       cards.push({
         id: "smart",
         title: "ストレージ SMART",
-        sev: "unknown",
+        severity: "unknown",
         primary: "対象未設定",
         secondary: "config/monitor.ts の smartDevices に device を追加してください",
       });
@@ -278,7 +268,7 @@ function buildHardwareCards(h: HealthResponse): CardSpec[] {
         cards.push({
           id: `smart-${s.device}`,
           title: `SMART ${s.device}`,
-          sev: s.passed ? "ok" : "critical",
+          severity: s.passed ? "ok" : "critical",
           primary: s.status,
           secondary: s.tempC !== null ? `温度 ${s.tempC} ℃` : undefined,
           hint: "FAILED / 不明 はディスク故障の前兆。早急にバックアップと交換準備を。",
@@ -289,7 +279,7 @@ function buildHardwareCards(h: HealthResponse): CardSpec[] {
     cards.push({
       id: "smart",
       title: "ストレージ SMART",
-      sev: "unknown",
+      severity: "unknown",
       primary: smart.reason === "not-installed" ? "smartmontools 未インストール" : "取得不可",
       secondary: smart.error,
     });
@@ -298,8 +288,8 @@ function buildHardwareCards(h: HealthResponse): CardSpec[] {
   return cards;
 }
 
-function buildNetworkCards(h: HealthResponse): CardSpec[] {
-  const cards: CardSpec[] = [];
+function buildNetworkCards(h: HealthResponse): StatusRow[] {
+  const cards: StatusRow[] = [];
   const { gateway, dns, ping } = h.health;
 
   if (gateway.ok) {
@@ -307,7 +297,7 @@ function buildNetworkCards(h: HealthResponse): CardSpec[] {
     cards.push({
       id: "gateway",
       title: "デフォルトゲートウェイ",
-      sev: gw ? "ok" : "warn",
+      severity: gw ? "ok" : "warn",
       primary: gw ?? "未設定",
       secondary: gateway.value.iface ? `経由 IF: ${gateway.value.iface}` : undefined,
       hint: "GW が無いと外部通信が成立しません。NIC 設定／ルータ設定を確認。",
@@ -316,7 +306,7 @@ function buildNetworkCards(h: HealthResponse): CardSpec[] {
     cards.push({
       id: "gateway",
       title: "デフォルトゲートウェイ",
-      sev: "unknown",
+      severity: "unknown",
       primary: "取得不可",
       secondary: gateway.error,
     });
@@ -327,7 +317,7 @@ function buildNetworkCards(h: HealthResponse): CardSpec[] {
     cards.push({
       id: "dns",
       title: "DNS 解決",
-      sev: failed.length === 0 ? "ok" : "warn",
+      severity: failed.length === 0 ? "ok" : "warn",
       primary: failed.length === 0 ? `${dns.value.length} 件すべて成功` : `${failed.length} 件失敗`,
       secondary: dns.value
         .map((d) => `${d.host} ${d.ok ? "✓" : "✗"}`)
@@ -338,7 +328,7 @@ function buildNetworkCards(h: HealthResponse): CardSpec[] {
     cards.push({
       id: "dns",
       title: "DNS 解決",
-      sev: "unknown",
+      severity: "unknown",
       primary: "取得不可",
       secondary: dns.error,
     });
@@ -349,7 +339,7 @@ function buildNetworkCards(h: HealthResponse): CardSpec[] {
       cards.push({
         id: `ping-${p.name}`,
         title: `ping ${p.name}`,
-        sev: p.ok ? "ok" : "warn",
+        severity: p.ok ? "ok" : "warn",
         primary: p.ok ? `${p.rttMs?.toFixed(1) ?? "?"} ms` : "応答なし",
         secondary: p.host ?? "宛先未解決",
         hint: "GW のみ NG → ローカル網／NIC、外部のみ NG → ISP・ルータ側を疑います。",
@@ -359,7 +349,7 @@ function buildNetworkCards(h: HealthResponse): CardSpec[] {
     cards.push({
       id: "ping",
       title: "ping",
-      sev: "unknown",
+      severity: "unknown",
       primary: "取得不可",
       secondary: ping.error,
     });
@@ -368,14 +358,14 @@ function buildNetworkCards(h: HealthResponse): CardSpec[] {
   return cards;
 }
 
-function buildSecurityCards(h: HealthResponse): CardSpec[] {
+function buildSecurityCards(h: HealthResponse): StatusRow[] {
   const { copyfail } = h.health;
   if (!copyfail.ok) {
     return [
       {
         id: "copyfail",
         title: "Copy Fail (CVE-2026-31431)",
-        sev: "unknown",
+        severity: "unknown",
         primary: "取得不可",
         secondary: copyfail.error,
       },
@@ -387,14 +377,14 @@ function buildSecurityCards(h: HealthResponse): CardSpec[] {
       {
         id: "copyfail",
         title: "Copy Fail (CVE-2026-31431)",
-        sev: "ok",
+        severity: "ok",
         primary: "対象外",
         secondary: "Linux 専用の脆弱性",
         hint: v.note,
       },
     ];
   }
-  const sev: Severity =
+  const severity: Severity =
     v.mitigation === "loaded-vulnerable"
       ? "critical"
       : v.mitigation === "not-loaded"
@@ -411,7 +401,7 @@ function buildSecurityCards(h: HealthResponse): CardSpec[] {
     {
       id: "copyfail",
       title: "Copy Fail (CVE-2026-31431)",
-      sev,
+      severity,
       primary,
       secondary: `${distroLabel} ／ kernel ${v.kernel}`,
       hint: v.note,
@@ -419,13 +409,13 @@ function buildSecurityCards(h: HealthResponse): CardSpec[] {
   ];
 }
 
-function buildServiceCards(s: ServicesResponse): CardSpec[] {
+function buildServiceCards(s: ServicesResponse): StatusRow[] {
   if (!s.services.ok) {
     return [
       {
         id: "services",
         title: "systemd サービス",
-        sev: "unknown",
+        severity: "unknown",
         primary: "取得不可",
         secondary: s.services.error,
       },
@@ -436,7 +426,7 @@ function buildServiceCards(s: ServicesResponse): CardSpec[] {
       {
         id: "services-empty",
         title: "systemd サービス",
-        sev: "unknown",
+        severity: "unknown",
         primary: "対象未設定",
         secondary: "config/monitor.ts の systemdUnits を編集してください",
       },
@@ -445,7 +435,7 @@ function buildServiceCards(s: ServicesResponse): CardSpec[] {
   return s.services.value.map((u) => ({
     id: `svc-${u.unit}`,
     title: u.unit,
-    sev:
+    severity:
       u.active === "active"
         ? "ok"
         : u.active === "failed"
@@ -573,95 +563,35 @@ export function Dashboard() {
         />
       ) : null}
 
-      <Section title="基本リソース">
-        {!status.data && !status.error ? (
-          <div className="col-span-full text-sm text-zinc-500 dark:text-zinc-400">
-            読み込み中…
-          </div>
-        ) : null}
-        {(status.data ? buildBasicCards(status.data) : []).map((c) => (
-          <StatusCard
-            key={c.id}
-            title={c.title}
-            severity={c.sev}
-            primary={c.primary}
-            secondary={c.secondary}
-            hint={c.hint}
-          />
-        ))}
-      </Section>
+      <StatusTable
+        title="基本リソース"
+        rows={status.data ? buildBasicCards(status.data) : []}
+        emptyMessage={status.error ? `取得失敗: ${status.error}` : "読み込み中…"}
+      />
 
-      <Section title="ハードウェア健全性">
-        {!health.data && !health.error ? (
-          <div className="col-span-full text-sm text-zinc-500 dark:text-zinc-400">
-            読み込み中…
-          </div>
-        ) : null}
-        {(health.data ? buildHardwareCards(health.data) : []).map((c) => (
-          <StatusCard
-            key={c.id}
-            title={c.title}
-            severity={c.sev}
-            primary={c.primary}
-            secondary={c.secondary}
-            hint={c.hint}
-          />
-        ))}
-      </Section>
+      <StatusTable
+        title="ハードウェア健全性"
+        rows={health.data ? buildHardwareCards(health.data) : []}
+        emptyMessage={health.error ? `取得失敗: ${health.error}` : "読み込み中…"}
+      />
 
-      <Section title="ネットワーク疎通">
-        {!health.data && !health.error ? (
-          <div className="col-span-full text-sm text-zinc-500 dark:text-zinc-400">
-            読み込み中…
-          </div>
-        ) : null}
-        {(health.data ? buildNetworkCards(health.data) : []).map((c) => (
-          <StatusCard
-            key={c.id}
-            title={c.title}
-            severity={c.sev}
-            primary={c.primary}
-            secondary={c.secondary}
-            hint={c.hint}
-          />
-        ))}
-      </Section>
+      <StatusTable
+        title="ネットワーク疎通"
+        rows={health.data ? buildNetworkCards(health.data) : []}
+        emptyMessage={health.error ? `取得失敗: ${health.error}` : "読み込み中…"}
+      />
 
-      <Section title="カーネルセキュリティ">
-        {!health.data && !health.error ? (
-          <div className="col-span-full text-sm text-zinc-500 dark:text-zinc-400">
-            読み込み中…
-          </div>
-        ) : null}
-        {(health.data ? buildSecurityCards(health.data) : []).map((c) => (
-          <StatusCard
-            key={c.id}
-            title={c.title}
-            severity={c.sev}
-            primary={c.primary}
-            secondary={c.secondary}
-            hint={c.hint}
-          />
-        ))}
-      </Section>
+      <StatusTable
+        title="カーネルセキュリティ"
+        rows={health.data ? buildSecurityCards(health.data) : []}
+        emptyMessage={health.error ? `取得失敗: ${health.error}` : "読み込み中…"}
+      />
 
-      <Section title="systemd サービス">
-        {!services.data && !services.error ? (
-          <div className="col-span-full text-sm text-zinc-500 dark:text-zinc-400">
-            読み込み中…
-          </div>
-        ) : null}
-        {(services.data ? buildServiceCards(services.data) : []).map((c) => (
-          <StatusCard
-            key={c.id}
-            title={c.title}
-            severity={c.sev}
-            primary={c.primary}
-            secondary={c.secondary}
-            hint={c.hint}
-          />
-        ))}
-      </Section>
+      <StatusTable
+        title="systemd サービス"
+        rows={services.data ? buildServiceCards(services.data) : []}
+        emptyMessage={services.error ? `取得失敗: ${services.error}` : "読み込み中…"}
+      />
 
       <LogPanel />
     </div>
