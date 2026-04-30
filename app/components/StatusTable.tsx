@@ -34,6 +34,7 @@ export interface StatusRow {
   primary: string;
   secondary?: string;
   hint?: string;
+  muted?: boolean;
 }
 
 export function StatusTable({
@@ -71,19 +72,34 @@ export function StatusTable({
             ) : (
               rows.map((r) => {
                 const s = sevStyle[r.severity];
+                const dim = r.muted ? "opacity-60" : "";
+                const rowBg = r.muted ? "" : s.row;
                 return (
-                  <tr key={r.id} className={`align-top ${s.row}`}>
+                  <tr key={r.id} className={`align-top ${rowBg} ${dim}`}>
                     <td className="px-3 py-2 whitespace-nowrap">
-                      <span className="inline-flex items-center gap-2">
-                        <span
-                          className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-[11px] font-bold ${s.dot}`}
-                          role="img"
-                          aria-label={s.label}
-                        >
-                          {s.icon}
+                      {r.muted ? (
+                        <span className="inline-flex items-center gap-2">
+                          <span
+                            className="inline-flex items-center justify-center px-1.5 h-5 rounded-full bg-zinc-300 dark:bg-zinc-700 text-[10px] font-semibold text-zinc-700 dark:text-zinc-200"
+                            role="img"
+                            aria-label="監視除外"
+                          >
+                            除外
+                          </span>
+                          <span className="text-xs text-zinc-500 dark:text-zinc-400">対象外</span>
                         </span>
-                        <span className="text-xs text-zinc-600 dark:text-zinc-300">{s.label}</span>
-                      </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-2">
+                          <span
+                            className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-[11px] font-bold ${s.dot}`}
+                            role="img"
+                            aria-label={s.label}
+                          >
+                            {s.icon}
+                          </span>
+                          <span className="text-xs text-zinc-600 dark:text-zinc-300">{s.label}</span>
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2 font-medium text-zinc-900 dark:text-zinc-50 whitespace-nowrap">
                       {r.title}
