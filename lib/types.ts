@@ -95,12 +95,23 @@ export interface PingResult {
   rttMs: number | null;
 }
 
+export interface CopyFailStatus {
+  kernel: string;
+  procVersion: string | null;
+  distro: { id: string | null; pretty: string | null };
+  algifAeadLoaded: boolean;
+  blacklisted: boolean;
+  mitigation: "loaded-vulnerable" | "blacklisted" | "not-loaded" | "non-linux";
+  note: string;
+}
+
 export interface HardwareNetwork {
   sensors: CollectorResult<SensorsValue>;
   smart: CollectorResult<SmartReading[]>;
   gateway: CollectorResult<GatewayInfo>;
   dns: CollectorResult<DnsResult[]>;
   ping: CollectorResult<PingResult[]>;
+  copyfail: CollectorResult<CopyFailStatus>;
 }
 
 export interface HealthResponse {

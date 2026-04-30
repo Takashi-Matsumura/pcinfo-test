@@ -143,6 +143,20 @@ export function mockHealth(): HardwareNetwork {
       ],
       collectedAt: now,
     },
+    copyfail: {
+      ok: true,
+      value: {
+        kernel: "6.8.0-mock-generic",
+        procVersion: "Linux version 6.8.0-mock-generic (mock@build) (gcc 13.2.0)",
+        distro: { id: "ubuntu", pretty: "Ubuntu 24.04 LTS (mock)" },
+        algifAeadLoaded: true,
+        blacklisted: false,
+        mitigation: "loaded-vulnerable",
+        note:
+          "algif_aead モジュールがロード中。CVE-2026-31431 の脆弱コードがアクティブです（モック）。",
+      },
+      collectedAt: now,
+    },
   };
 }
 

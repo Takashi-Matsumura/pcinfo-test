@@ -7,7 +7,7 @@ import type {
   Severity,
 } from "./types";
 
-export type Category = "hardware" | "software" | "network";
+export type Category = "hardware" | "software" | "network" | "security";
 
 export interface CategoryFinding {
   category: Category;
@@ -37,6 +37,7 @@ const CATEGORY_LABEL: Record<Category, string> = {
   hardware: "ハードウェア",
   software: "ソフトウェア／サービス",
   network: "ネットワーク",
+  security: "セキュリティ",
 };
 
 export interface SummarizeInput {
@@ -51,6 +52,7 @@ export function summarize({ basic, health, services }: SummarizeInput): SummaryR
     hardware: { category: "hardware", severity: "ok", hits: [] },
     software: { category: "software", severity: "ok", hits: [] },
     network: { category: "network", severity: "ok", hits: [] },
+    security: { category: "security", severity: "ok", hits: [] },
   };
 
   const note = (cat: Category, sev: Severity, msg: string) => {
@@ -134,6 +136,14 @@ export function summarize({ basic, health, services }: SummarizeInput): SummaryR
         note("network", "warn", `ping 失敗 ${failed.map((p) => p.name).join(", ")}`);
       }
     }
+    if (health.copyfail.ok) {
+      const cf = health.copyfail.value;
+      if (cf.mitigation === "loaded-vulnerable") {
+        note("security", "critical", "Copy Fail (CVE-2026-31431) 緩和未適用：algif_aead ロード中");
+      } else if (cf.mitigation === "not-loaded") {
+        note("security", "warn", "Copy Fail (CVE-2026-31431) 未確認：algif_aead ブラックリスト未設定");
+      }
+    }
   }
 
   // ----- services -----
@@ -146,7 +156,12 @@ export function summarize({ basic, health, services }: SummarizeInput): SummaryR
     }
   }
 
-  const findings: CategoryFinding[] = [buckets.hardware, buckets.software, buckets.network];
+  const findings: CategoryFinding[] = [
+    buckets.hardware,
+    buckets.software,
+    buckets.network,
+    buckets.security,
+  ];
   const overall: Severity = findings.reduce<Severity>((acc, f) => worse(acc, f.severity), "ok");
 
   let primary: Category | null = null;
