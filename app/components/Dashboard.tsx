@@ -560,6 +560,11 @@ export function Dashboard() {
               ? "監視サーバから応答がありません。ダッシュボード自身か中継経路の問題かもしれません。"
               : summary.message
           }
+          score={summary.score}
+          gradeLabel={summary.gradeLabel}
+          grade={summary.grade}
+          findings={summary.findings}
+          unavailable={stale}
         />
       ) : null}
 

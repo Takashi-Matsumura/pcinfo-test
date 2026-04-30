@@ -13,13 +13,42 @@ export interface CategoryFinding {
   category: Category;
   severity: Severity;
   hits: string[];
+  warnCount: number;
+  criticalCount: number;
+  score: number;
 }
+
+export type Grade = "excellent" | "good" | "caution" | "critical";
 
 export interface SummaryResult {
   overall: Severity;
   primary: Category | null;
   findings: CategoryFinding[];
   message: string;
+  score: number;
+  grade: Grade;
+  gradeLabel: string;
+}
+
+const PENALTY: Record<Severity, number> = {
+  ok: 0,
+  unknown: 0,
+  warn: 5,
+  critical: 15,
+};
+
+const CATEGORY_PENALTY_CAP = 60;
+
+function gradeFromScore(score: number): { grade: Grade; label: string } {
+  if (score >= 90) return { grade: "excellent", label: "良好" };
+  if (score >= 70) return { grade: "good", label: "概ね正常" };
+  if (score >= 40) return { grade: "caution", label: "要注意" };
+  return { grade: "critical", label: "異常" };
+}
+
+function summarizeHits(hits: string[], maxShow = 3): string {
+  if (hits.length <= maxShow) return hits.join("、");
+  return `${hits.slice(0, maxShow).join("、")} 他 ${hits.length - maxShow} 件`;
 }
 
 const SEV_RANK: Record<Severity, number> = {
@@ -48,17 +77,31 @@ export interface SummarizeInput {
 
 export function summarize({ basic, health, services }: SummarizeInput): SummaryResult {
   const t = monitorConfig.thresholds;
+  const mkBucket = (category: Category): CategoryFinding => ({
+    category,
+    severity: "ok",
+    hits: [],
+    warnCount: 0,
+    criticalCount: 0,
+    score: 100,
+  });
   const buckets: Record<Category, CategoryFinding> = {
-    hardware: { category: "hardware", severity: "ok", hits: [] },
-    software: { category: "software", severity: "ok", hits: [] },
-    network: { category: "network", severity: "ok", hits: [] },
-    security: { category: "security", severity: "ok", hits: [] },
+    hardware: mkBucket("hardware"),
+    software: mkBucket("software"),
+    network: mkBucket("network"),
+    security: mkBucket("security"),
   };
 
   const note = (cat: Category, sev: Severity, msg: string) => {
     const f = buckets[cat];
     f.severity = worse(f.severity, sev);
-    if (sev === "warn" || sev === "critical") f.hits.push(msg);
+    if (sev === "warn") {
+      f.hits.push(msg);
+      f.warnCount += 1;
+    } else if (sev === "critical") {
+      f.hits.push(msg);
+      f.criticalCount += 1;
+    }
   };
 
   // ----- basic -----
@@ -162,6 +205,17 @@ export function summarize({ basic, health, services }: SummarizeInput): SummaryR
     buckets.network,
     buckets.security,
   ];
+
+  let totalPenalty = 0;
+  for (const f of findings) {
+    const raw = f.warnCount * PENALTY.warn + f.criticalCount * PENALTY.critical;
+    const capped = Math.min(CATEGORY_PENALTY_CAP, raw);
+    f.score = Math.max(0, 100 - capped);
+    totalPenalty += capped;
+  }
+  const score = Math.max(0, Math.min(100, Math.round(100 - totalPenalty)));
+  const { grade, label: gradeLabel } = gradeFromScore(score);
+
   const overall: Severity = findings.reduce<Severity>((acc, f) => worse(acc, f.severity), "ok");
 
   let primary: Category | null = null;
@@ -176,16 +230,21 @@ export function summarize({ basic, health, services }: SummarizeInput): SummaryR
 
   let message: string;
   if (overall === "ok") {
-    message = "サーバは正常に稼働しています。すべての観測項目が良好です。";
+    message = "全観測項目が正常範囲内です。";
   } else {
     const reasons = findings
       .filter((f) => f.severity === "warn" || f.severity === "critical")
-      .map((f) => `${CATEGORY_LABEL[f.category]}（${f.hits.join("、")}）`);
+      .map((f) => {
+        const counts: string[] = [];
+        if (f.criticalCount > 0) counts.push(`異常 ${f.criticalCount}`);
+        if (f.warnCount > 0) counts.push(`注意 ${f.warnCount}`);
+        return `${CATEGORY_LABEL[f.category]}（${counts.join("・")}：${summarizeHits(f.hits)}）`;
+      });
     const head = primary
-      ? `${CATEGORY_LABEL[primary]}側に問題の可能性があります。`
-      : "複合的な問題の可能性があります。";
-    message = `${head} 検出: ${reasons.join(" ／ ")}`;
+      ? `主因は${CATEGORY_LABEL[primary]}。`
+      : "複合的な問題の可能性。";
+    message = `${head} ${reasons.join(" ／ ")}`;
   }
 
-  return { overall, primary, findings, message };
+  return { overall, primary, findings, message, score, grade, gradeLabel };
 }
