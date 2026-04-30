@@ -5,12 +5,25 @@ import { PlainSummary } from "./PlainSummary";
 import { LogPanel } from "./LogPanel";
 import { monitorConfig } from "@/config/monitor";
 import { summarize } from "@/lib/judge";
+import { useMuteList, type MuteCategory, type MuteList } from "@/app/hooks/useMuteList";
 import type {
   HealthResponse,
   ServicesResponse,
   Severity,
   StatusResponse,
 } from "@/lib/types";
+
+function muteState(
+  cat: MuteCategory,
+  key: string,
+  user: MuteList,
+): { muted: boolean; origin: "config" | "user" | undefined } {
+  const inConfig = monitorConfig.ignore[cat].includes(key);
+  const inUser = user[cat].includes(key);
+  if (inConfig) return { muted: true, origin: "config" };
+  if (inUser) return { muted: true, origin: "user" };
+  return { muted: false, origin: undefined };
+}
 
 function fmtBytes(n: number): string {
   if (!Number.isFinite(n)) return "—";
@@ -40,7 +53,7 @@ function sevByPercent(p: number, warn: number, crit: number): Severity {
   return "ok";
 }
 
-function buildBasicCards(data: StatusResponse): StatusRow[] {
+function buildBasicCards(data: StatusResponse, mute: MuteList): StatusRow[] {
   const cards: StatusRow[] = [];
   const t = monitorConfig.thresholds;
   const { cpu, mem, load, uptime, disk, netLink } = data.basic;
@@ -141,17 +154,20 @@ function buildBasicCards(data: StatusResponse): StatusRow[] {
       });
     } else {
       disk.value.forEach((d) => {
-        const muted = monitorConfig.ignore.diskMounts.includes(d.mount);
+        const m = muteState("diskMounts", d.mount, mute);
         cards.push({
           id: `disk-${d.mount}`,
           title: `ディスク ${d.mount}`,
-          severity: muted
+          severity: m.muted
             ? "unknown"
             : sevByPercent(d.usagePercent, t.diskPercent.warn, t.diskPercent.critical),
           primary: `${d.usagePercent.toFixed(0)} %`,
           secondary: `${fmtBytes(d.usedBytes)} / ${fmtBytes(d.totalBytes)}（${d.device}）`,
           hint: "満杯間際だとログ書き込みやアップデートが失敗してアプリが落ちる原因に。",
-          muted,
+          muted: m.muted,
+          muteCategory: "diskMounts",
+          muteKey: d.mount,
+          muteOrigin: m.origin,
         });
       });
     }
@@ -167,8 +183,8 @@ function buildBasicCards(data: StatusResponse): StatusRow[] {
 
   if (netLink.ok) {
     netLink.value.forEach((n) => {
-      const muted = monitorConfig.ignore.interfaces.includes(n.name);
-      const severity: Severity = muted
+      const m = muteState("interfaces", n.name, mute);
+      const severity: Severity = m.muted
         ? "unknown"
         : n.operstate === "up" && n.carrier === 1
           ? "ok"
@@ -187,7 +203,10 @@ function buildBasicCards(data: StatusResponse): StatusRow[] {
               : "キャリア無し",
         secondary: n.speedMbps ? `${n.speedMbps} Mbps` : undefined,
         hint: "ケーブル抜け／HUB 故障／NIC 故障の可能性。LAN ポートの LED と合わせて確認。",
-        muted,
+        muted: m.muted,
+        muteCategory: "interfaces",
+        muteKey: n.name,
+        muteOrigin: m.origin,
       });
     });
   } else {
@@ -202,7 +221,7 @@ function buildBasicCards(data: StatusResponse): StatusRow[] {
   return cards;
 }
 
-function buildHardwareCards(h: HealthResponse): StatusRow[] {
+function buildHardwareCards(h: HealthResponse, mute: MuteList): StatusRow[] {
   const t = monitorConfig.thresholds;
   const cards: StatusRow[] = [];
   const { sensors, smart } = h.health;
@@ -272,15 +291,18 @@ function buildHardwareCards(h: HealthResponse): StatusRow[] {
       });
     } else {
       smart.value.forEach((s) => {
-        const muted = monitorConfig.ignore.smartDevices.includes(s.device);
+        const m = muteState("smartDevices", s.device, mute);
         cards.push({
           id: `smart-${s.device}`,
           title: `SMART ${s.device}`,
-          severity: muted ? "unknown" : s.passed ? "ok" : "critical",
+          severity: m.muted ? "unknown" : s.passed ? "ok" : "critical",
           primary: s.status,
           secondary: s.tempC !== null ? `温度 ${s.tempC} ℃` : undefined,
           hint: "FAILED / 不明 はディスク故障の前兆。早急にバックアップと交換準備を。",
-          muted,
+          muted: m.muted,
+          muteCategory: "smartDevices",
+          muteKey: s.device,
+          muteOrigin: m.origin,
         });
       });
     }
@@ -297,7 +319,7 @@ function buildHardwareCards(h: HealthResponse): StatusRow[] {
   return cards;
 }
 
-function buildNetworkCards(h: HealthResponse): StatusRow[] {
+function buildNetworkCards(h: HealthResponse, mute: MuteList): StatusRow[] {
   const cards: StatusRow[] = [];
   const { gateway, dns, ping } = h.health;
 
@@ -322,7 +344,7 @@ function buildNetworkCards(h: HealthResponse): StatusRow[] {
   }
 
   if (dns.ok) {
-    const ignored = monitorConfig.ignore.dnsHosts;
+    const ignored = [...monitorConfig.ignore.dnsHosts, ...mute.dnsHosts];
     const considered = dns.value.filter((d) => !ignored.includes(d.host));
     const failed = considered.filter((d) => !d.ok);
     cards.push({
@@ -353,15 +375,18 @@ function buildNetworkCards(h: HealthResponse): StatusRow[] {
 
   if (ping.ok) {
     ping.value.forEach((p) => {
-      const muted = monitorConfig.ignore.pingTargets.includes(p.name);
+      const m = muteState("pingTargets", p.name, mute);
       cards.push({
         id: `ping-${p.name}`,
         title: `ping ${p.name}`,
-        severity: muted ? "unknown" : p.ok ? "ok" : "warn",
+        severity: m.muted ? "unknown" : p.ok ? "ok" : "warn",
         primary: p.ok ? `${p.rttMs?.toFixed(1) ?? "?"} ms` : "応答なし",
         secondary: p.host ?? "宛先未解決",
         hint: "GW のみ NG → ローカル網／NIC、外部のみ NG → ISP・ルータ側を疑います。",
-        muted,
+        muted: m.muted,
+        muteCategory: "pingTargets",
+        muteKey: p.name,
+        muteOrigin: m.origin,
       });
     });
   } else {
@@ -428,7 +453,7 @@ function buildSecurityCards(h: HealthResponse): StatusRow[] {
   ];
 }
 
-function buildServiceCards(s: ServicesResponse): StatusRow[] {
+function buildServiceCards(s: ServicesResponse, mute: MuteList): StatusRow[] {
   if (!s.services.ok) {
     return [
       {
@@ -452,8 +477,8 @@ function buildServiceCards(s: ServicesResponse): StatusRow[] {
     ];
   }
   return s.services.value.map((u) => {
-    const muted = monitorConfig.ignore.services.includes(u.unit);
-    const severity: Severity = muted
+    const m = muteState("services", u.unit, mute);
+    const severity: Severity = m.muted
       ? "unknown"
       : u.active === "active"
         ? "ok"
@@ -469,7 +494,10 @@ function buildServiceCards(s: ServicesResponse): StatusRow[] {
         u.active === "active"
           ? undefined
           : "サービス停止／起動失敗。ソフト側の典型的な障害。`systemctl status <unit>` で詳細確認。",
-      muted,
+      muted: m.muted,
+      muteCategory: "services",
+      muteKey: u.unit,
+      muteOrigin: m.origin,
     };
   });
 }
@@ -528,6 +556,8 @@ export function Dashboard() {
     return () => clearInterval(id);
   }, []);
 
+  const { muteList, toggleMute } = useMuteList();
+
   const status = usePolling<StatusResponse>(
     "/api/status",
     monitorConfig.refreshIntervalsMs.status,
@@ -552,6 +582,7 @@ export function Dashboard() {
         basic: status.data.basic,
         health: health.data?.health,
         services: services.data?.services,
+        userIgnore: muteList,
       })
     : null;
 
@@ -595,20 +626,23 @@ export function Dashboard() {
 
       <StatusTable
         title="基本リソース"
-        rows={status.data ? buildBasicCards(status.data) : []}
+        rows={status.data ? buildBasicCards(status.data, muteList) : []}
         emptyMessage={status.error ? `取得失敗: ${status.error}` : "読み込み中…"}
+        onToggleMute={toggleMute}
       />
 
       <StatusTable
         title="ハードウェア健全性"
-        rows={health.data ? buildHardwareCards(health.data) : []}
+        rows={health.data ? buildHardwareCards(health.data, muteList) : []}
         emptyMessage={health.error ? `取得失敗: ${health.error}` : "読み込み中…"}
+        onToggleMute={toggleMute}
       />
 
       <StatusTable
         title="ネットワーク疎通"
-        rows={health.data ? buildNetworkCards(health.data) : []}
+        rows={health.data ? buildNetworkCards(health.data, muteList) : []}
         emptyMessage={health.error ? `取得失敗: ${health.error}` : "読み込み中…"}
+        onToggleMute={toggleMute}
       />
 
       <StatusTable
@@ -619,8 +653,9 @@ export function Dashboard() {
 
       <StatusTable
         title="systemd サービス"
-        rows={services.data ? buildServiceCards(services.data) : []}
+        rows={services.data ? buildServiceCards(services.data, muteList) : []}
         emptyMessage={services.error ? `取得失敗: ${services.error}` : "読み込み中…"}
+        onToggleMute={toggleMute}
       />
 
       <LogPanel />
