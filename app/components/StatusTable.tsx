@@ -2,6 +2,60 @@
 import type { Severity } from "@/lib/types";
 import type { MuteCategory } from "@/app/hooks/useMuteList";
 
+function MuteSwitch({
+  checked,
+  disabled,
+  onToggle,
+  title,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  onToggle?: () => void;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label="監視除外（ミュート）切替"
+      disabled={disabled}
+      onClick={onToggle}
+      title={title}
+      className={`inline-flex items-center gap-2 ${
+        disabled ? "cursor-not-allowed" : "cursor-pointer"
+      }`}
+    >
+      <span
+        className={`relative inline-block h-4 w-7 rounded-full transition-colors ${
+          checked
+            ? disabled
+              ? "bg-zinc-400 dark:bg-zinc-600"
+              : "bg-amber-500"
+            : "bg-zinc-300 dark:bg-zinc-700"
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow-sm transition-all ${
+            checked ? "left-3.5" : "left-0.5"
+          }`}
+        />
+      </span>
+      <span
+        className={`text-xs ${
+          disabled
+            ? "text-zinc-400 dark:text-zinc-500"
+            : checked
+              ? "text-amber-700 dark:text-amber-300 font-medium"
+              : "text-zinc-500 dark:text-zinc-400"
+        }`}
+      >
+        ミュート
+      </span>
+    </button>
+  );
+}
+
 const sevStyle: Record<Severity, { dot: string; label: string; icon: string; row: string }> = {
   ok: {
     dot: "bg-emerald-500",
@@ -128,24 +182,19 @@ export function StatusTable({
                       {!canToggle ? (
                         <span className="text-xs text-zinc-400 dark:text-zinc-600">—</span>
                       ) : r.muteOrigin === "config" ? (
-                        <span
-                          className="text-xs text-zinc-400 dark:text-zinc-500"
+                        <MuteSwitch
+                          checked
+                          disabled
                           title="config/monitor.ts で除外設定済み"
-                        >
-                          config 設定
-                        </span>
+                        />
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => onToggleMute?.(r.muteCategory!, r.muteKey!)}
-                          className={`text-xs px-2 py-1 rounded ring-1 transition-colors ${
-                            r.muteOrigin === "user"
-                              ? "ring-emerald-400/50 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
-                              : "ring-zinc-300 dark:ring-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                          }`}
-                        >
-                          {r.muteOrigin === "user" ? "解除" : "ミュート"}
-                        </button>
+                        <MuteSwitch
+                          checked={r.muteOrigin === "user"}
+                          onToggle={() => onToggleMute?.(r.muteCategory!, r.muteKey!)}
+                          title={
+                            r.muteOrigin === "user" ? "クリックで監視を再開" : "クリックでミュート"
+                          }
+                        />
                       )}
                     </td>
                   </tr>
