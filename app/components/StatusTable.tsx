@@ -22,7 +22,7 @@ function MuteSwitch({
       disabled={disabled}
       onClick={onToggle}
       title={title}
-      className={`inline-flex items-center gap-2 ${
+      className={`inline-flex items-center ${
         disabled ? "cursor-not-allowed" : "cursor-pointer"
       }`}
     >
@@ -40,17 +40,6 @@ function MuteSwitch({
             checked ? "left-3.5" : "left-0.5"
           }`}
         />
-      </span>
-      <span
-        className={`text-xs ${
-          disabled
-            ? "text-zinc-400 dark:text-zinc-500"
-            : checked
-              ? "text-amber-700 dark:text-amber-300 font-medium"
-              : "text-zinc-500 dark:text-zinc-400"
-        }`}
-      >
-        ミュート
       </span>
     </button>
   );
@@ -121,8 +110,8 @@ export function StatusTable({
               <th className="px-3 py-2 font-medium whitespace-nowrap">値</th>
               <th className="px-3 py-2 font-medium whitespace-nowrap">補足</th>
               <th className="px-3 py-2 font-medium whitespace-nowrap">ヒント</th>
-              <th className="px-3 py-2 font-medium whitespace-nowrap w-[110px] text-right">
-                操作
+              <th className="px-3 py-2 font-medium whitespace-nowrap w-[80px] text-right">
+                ミュート
               </th>
             </tr>
           </thead>
