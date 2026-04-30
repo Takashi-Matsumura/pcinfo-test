@@ -6,6 +6,7 @@ import { collectSmart } from "@/lib/collectors/smart";
 import { collectGateway } from "@/lib/collectors/gateway";
 import { collectDns } from "@/lib/collectors/dns";
 import { collectPing } from "@/lib/collectors/ping";
+import { collectCopyFail } from "@/lib/collectors/copyfail";
 import { mockHealth } from "@/lib/collectors/mock";
 import type { HardwareNetwork, HealthResponse } from "@/lib/types";
 
@@ -13,17 +14,18 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 async function collectHealthReal(): Promise<HardwareNetwork> {
-  const [sensors, smart, gateway] = await Promise.all([
+  const [sensors, smart, gateway, copyfail] = await Promise.all([
     collectSensors(),
     collectSmart(monitorConfig.smartDevices),
     collectGateway(),
+    collectCopyFail(),
   ]);
   const gatewayIp = gateway.ok ? gateway.value.gateway : null;
   const [dns, ping] = await Promise.all([
     collectDns(monitorConfig.dnsTestHosts),
     collectPing(monitorConfig.pingTargets, gatewayIp),
   ]);
-  return { sensors, smart, gateway, dns, ping };
+  return { sensors, smart, gateway, dns, ping, copyfail };
 }
 
 export async function GET() {

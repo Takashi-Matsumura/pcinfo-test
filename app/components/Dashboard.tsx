@@ -368,6 +368,57 @@ function buildNetworkCards(h: HealthResponse): CardSpec[] {
   return cards;
 }
 
+function buildSecurityCards(h: HealthResponse): CardSpec[] {
+  const { copyfail } = h.health;
+  if (!copyfail.ok) {
+    return [
+      {
+        id: "copyfail",
+        title: "Copy Fail (CVE-2026-31431)",
+        sev: "unknown",
+        primary: "取得不可",
+        secondary: copyfail.error,
+      },
+    ];
+  }
+  const v = copyfail.value;
+  if (v.mitigation === "non-linux") {
+    return [
+      {
+        id: "copyfail",
+        title: "Copy Fail (CVE-2026-31431)",
+        sev: "ok",
+        primary: "対象外",
+        secondary: "Linux 専用の脆弱性",
+        hint: v.note,
+      },
+    ];
+  }
+  const sev: Severity =
+    v.mitigation === "loaded-vulnerable"
+      ? "critical"
+      : v.mitigation === "not-loaded"
+        ? "warn"
+        : "ok";
+  const primary =
+    v.mitigation === "loaded-vulnerable"
+      ? "脆弱モジュールがロード中"
+      : v.mitigation === "blacklisted"
+        ? "ブラックリスト済（緩和適用）"
+        : "未ロード（要確認）";
+  const distroLabel = v.distro.pretty ?? v.distro.id ?? "ディストリ不明";
+  return [
+    {
+      id: "copyfail",
+      title: "Copy Fail (CVE-2026-31431)",
+      sev,
+      primary,
+      secondary: `${distroLabel} ／ kernel ${v.kernel}`,
+      hint: v.note,
+    },
+  ];
+}
+
 function buildServiceCards(s: ServicesResponse): CardSpec[] {
   if (!s.services.ok) {
     return [
@@ -565,6 +616,24 @@ export function Dashboard() {
           </div>
         ) : null}
         {(health.data ? buildNetworkCards(health.data) : []).map((c) => (
+          <StatusCard
+            key={c.id}
+            title={c.title}
+            severity={c.sev}
+            primary={c.primary}
+            secondary={c.secondary}
+            hint={c.hint}
+          />
+        ))}
+      </Section>
+
+      <Section title="カーネルセキュリティ">
+        {!health.data && !health.error ? (
+          <div className="col-span-full text-sm text-zinc-500 dark:text-zinc-400">
+            読み込み中…
+          </div>
+        ) : null}
+        {(health.data ? buildSecurityCards(health.data) : []).map((c) => (
           <StatusCard
             key={c.id}
             title={c.title}
