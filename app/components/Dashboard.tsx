@@ -589,9 +589,20 @@ export function Dashboard() {
   return (
     <div className="space-y-6">
       <header className="flex items-baseline justify-between flex-wrap gap-3">
-        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
-          サーバ状態モニター
-        </h1>
+        <div className="flex items-baseline gap-3 flex-wrap">
+          <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
+            サーバ状態モニター
+          </h1>
+          {status.data?.target ? (
+            <span className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded ring-1 ring-zinc-200 dark:ring-zinc-700 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200">
+              <span className="text-zinc-400 dark:text-zinc-500">ターゲット</span>
+              <span className="font-medium">{status.data.target.name}</span>
+              <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono">
+                {status.data.target.kind}
+              </span>
+            </span>
+          ) : null}
+        </div>
         <div className="text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-3 flex-wrap">
           {stale ? (
             <span className="text-rose-600 dark:text-rose-400 font-medium">

@@ -1,3 +1,12 @@
+import type { Target } from "@/lib/types";
+
+// 監視対象（Target）の定義。
+// Phase 1 では "host" のみ対応（自ホスト=Next.js が稼働するマシン）。
+// Phase 2 で "docker"、Phase 3 で "service" probe を追加予定。
+export const targets: Target[] = [
+  { id: "local", kind: "host", name: "このホスト" },
+];
+
 export const monitorConfig = {
   thresholds: {
     cpuPercent: { warn: 85, critical: 95 },

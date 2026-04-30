@@ -1,5 +1,34 @@
 export type Severity = "ok" | "warn" | "critical" | "unknown";
 
+export type TargetKind = "host" | "docker" | "service";
+
+export interface TargetBase {
+  id: string;
+  name: string;
+  kind: TargetKind;
+}
+
+export interface HostTarget extends TargetBase {
+  kind: "host";
+}
+
+export interface DockerTarget extends TargetBase {
+  kind: "docker";
+  containerName: string;
+}
+
+export interface ServiceTarget extends TargetBase {
+  kind: "service";
+}
+
+export type Target = HostTarget | DockerTarget | ServiceTarget;
+
+export interface TargetRef {
+  id: string;
+  name: string;
+  kind: TargetKind;
+}
+
 export type CollectorReason =
   | "unsupported-platform"
   | "not-installed"
@@ -49,6 +78,7 @@ export interface BasicResources {
 export interface StatusResponse {
   serverTime: string;
   platform: NodeJS.Platform;
+  target: TargetRef;
   basic: BasicResources;
 }
 
@@ -117,6 +147,7 @@ export interface HardwareNetwork {
 export interface HealthResponse {
   serverTime: string;
   platform: NodeJS.Platform;
+  target: TargetRef;
   health: HardwareNetwork;
 }
 
@@ -128,6 +159,7 @@ export interface ServiceState {
 export interface ServicesResponse {
   serverTime: string;
   platform: NodeJS.Platform;
+  target: TargetRef;
   services: CollectorResult<ServiceState[]>;
 }
 
@@ -139,5 +171,6 @@ export interface LogEntry {
 export interface LogsResponse {
   serverTime: string;
   platform: NodeJS.Platform;
+  target: TargetRef;
   logs: CollectorResult<LogEntry[]>;
 }
