@@ -827,6 +827,7 @@ export function Dashboard() {
 
       {view === "topology" ? (
         <TopologyView
+          muteList={muteList}
           onSelectTarget={(id) => {
             setActiveTargetId(id);
             setView("detail");

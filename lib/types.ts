@@ -244,6 +244,10 @@ export interface TargetLink {
 export type OverviewCategory = "hardware" | "software" | "network" | "security";
 export type OverviewGrade = "excellent" | "good" | "caution" | "critical";
 
+// クライアント側で summarize() を呼んで構築する集計型。
+// 詳細ビューと同じ判定ロジック（mute 適用込み）を共有するため、
+// サーバ API は集計前の生データ (TargetCollected) を返し、
+// クライアントが userIgnore=muteList を加味して計算する。
 export interface TargetOverview {
   ref: TargetRef;
   severity: Severity;
@@ -255,9 +259,19 @@ export interface TargetOverview {
   error?: string;
 }
 
+// /api/overview が返す、ターゲットごとの収集結果（未集計）。
+export interface TargetCollected {
+  ref: TargetRef;
+  basic?: BasicData;
+  health?: HardwareNetwork;
+  services?: CollectorResult<ServiceState[]>;
+  probes?: CollectorResult<ProbeResult[]>;
+  error?: string;
+}
+
 export interface OverviewResponse {
   serverTime: string;
   platform: NodeJS.Platform;
-  targets: TargetOverview[];
+  targets: TargetCollected[];
   links: TargetLink[];
 }
