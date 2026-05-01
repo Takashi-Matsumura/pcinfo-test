@@ -3,6 +3,7 @@ import type {
   BasicData,
   CollectorResult,
   HardwareNetwork,
+  ProbeResult,
   ServiceState,
   Severity,
 } from "./types";
@@ -82,6 +83,7 @@ export interface SummarizeInput {
   basic: BasicData;
   health?: HardwareNetwork;
   services?: CollectorResult<ServiceState[]>;
+  probes?: CollectorResult<ProbeResult[]>;
   userIgnore?: UserIgnore;
 }
 
@@ -89,6 +91,7 @@ export function summarize({
   basic,
   health,
   services,
+  probes,
   userIgnore,
 }: SummarizeInput): SummaryResult {
   const t = monitorConfig.thresholds;
@@ -262,6 +265,15 @@ export function summarize({
       if (s.active !== "active") {
         const sev: Severity = s.active === "failed" ? "critical" : "warn";
         note("software", sev, `${s.unit} → ${s.active}`);
+      }
+    }
+  }
+
+  // ----- probes -----
+  if (probes?.ok) {
+    for (const p of probes.value) {
+      if (!p.ok) {
+        note("network", "critical", `probe ${p.name} 失敗`);
       }
     }
   }
