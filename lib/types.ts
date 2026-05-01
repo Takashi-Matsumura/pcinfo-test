@@ -8,6 +8,31 @@ export interface TargetBase {
   kind: TargetKind;
 }
 
+export type Probe =
+  | {
+      name: string;
+      type: "http";
+      url: string;
+      expectStatus?: number; // default: 2xx
+      timeoutMs?: number; // default: 3000
+    }
+  | {
+      name: string;
+      type: "tcp";
+      host: string;
+      port: number;
+      timeoutMs?: number; // default: 2000
+    };
+
+export interface ProbeResult {
+  name: string;
+  type: Probe["type"];
+  ok: boolean;
+  latencyMs: number | null;
+  detail: string;
+  error?: string;
+}
+
 export interface HostTarget extends TargetBase {
   kind: "host";
 }
@@ -15,10 +40,12 @@ export interface HostTarget extends TargetBase {
 export interface DockerTarget extends TargetBase {
   kind: "docker";
   containerName: string;
+  probes?: Probe[];
 }
 
 export interface ServiceTarget extends TargetBase {
   kind: "service";
+  probes: Probe[];
 }
 
 export type Target = HostTarget | DockerTarget | ServiceTarget;
@@ -199,4 +226,11 @@ export interface LogsResponse {
   platform: NodeJS.Platform;
   target: TargetRef;
   logs: CollectorResult<LogEntry[]>;
+}
+
+export interface ProbesResponse {
+  serverTime: string;
+  platform: NodeJS.Platform;
+  target: TargetRef;
+  probes: CollectorResult<ProbeResult[]>;
 }

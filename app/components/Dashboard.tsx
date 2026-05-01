@@ -9,6 +9,7 @@ import { useMuteList, type MuteCategory, type MuteList } from "@/app/hooks/useMu
 import type {
   ContainerBasicResources,
   HealthResponse,
+  ProbesResponse,
   ServicesResponse,
   Severity,
   StatusResponse,
@@ -59,6 +60,47 @@ function buildBasicCards(data: StatusResponse, mute: MuteList): StatusRow[] {
     return buildContainerBasicCards(data.basic);
   }
   return buildHostBasicCards(data, mute);
+}
+
+function buildProbeCards(p: ProbesResponse): StatusRow[] {
+  if (!p.probes.ok) {
+    return [
+      {
+        id: "probes-err",
+        title: "サービス疎通",
+        severity: "unknown",
+        primary: "取得不可",
+        secondary: p.probes.error,
+      },
+    ];
+  }
+  if (p.probes.value.length === 0) {
+    return [
+      {
+        id: "probes-empty",
+        title: "サービス疎通",
+        severity: "unknown",
+        primary: "probe 未設定",
+        secondary: "config/monitor.ts でこの target に probes を追加してください",
+      },
+    ];
+  }
+  return p.probes.value.map((r) => ({
+    id: `probe-${r.name}`,
+    title: r.name,
+    severity: r.ok ? "ok" : "critical",
+    primary: r.ok
+      ? r.latencyMs !== null
+        ? `${r.latencyMs} ms`
+        : "成功"
+      : "失敗",
+    secondary: r.detail,
+    hint: r.ok
+      ? undefined
+      : r.error
+        ? `エラー: ${r.error}`
+        : "エンドポイントが応答していません。コンテナ・ポート・ネットワークを確認。",
+  }));
 }
 
 function fmtBytesShort(n: number): string {
@@ -735,6 +777,16 @@ export function Dashboard() {
     isHost ? `/api/services${targetQuery}` : null,
     monitorConfig.refreshIntervalsMs.services,
   );
+  const hasProbes =
+    activeTarget?.kind === "docker"
+      ? (activeTarget.probes?.length ?? 0) > 0
+      : activeTarget?.kind === "service"
+        ? activeTarget.probes.length > 0
+        : false;
+  const probes = usePolling<ProbesResponse>(
+    hasProbes ? `/api/probes${targetQuery}` : null,
+    monitorConfig.refreshIntervalsMs.probes,
+  );
 
   // ターゲット切替直後の古い状態でセクションを描かないためのガード。
   const matchesTarget = <T extends { target: { id: string } }>(d: T | null) =>
@@ -742,6 +794,7 @@ export function Dashboard() {
   const statusData = matchesTarget(status.data);
   const healthData = isHost ? matchesTarget(health.data) : null;
   const servicesData = isHost ? matchesTarget(services.data) : null;
+  const probesData = hasProbes ? matchesTarget(probes.data) : null;
 
   const stale = status.error !== null && status.fails >= 3;
   const lastAgo =
@@ -754,6 +807,7 @@ export function Dashboard() {
         basic: statusData.basic,
         health: healthData?.health,
         services: servicesData?.services,
+        probes: probesData?.probes,
         userIgnore: muteList,
       })
     : null;
@@ -841,6 +895,14 @@ export function Dashboard() {
         onToggleMute={toggleMute}
       />
 
+      {hasProbes ? (
+        <StatusTable
+          title="サービス疎通"
+          rows={probesData ? buildProbeCards(probesData) : []}
+          emptyMessage={probes.error ? `取得失敗: ${probes.error}` : "読み込み中…"}
+        />
+      ) : null}
+
       {isHost ? (
         <>
           <StatusTable
@@ -872,11 +934,11 @@ export function Dashboard() {
 
           <LogPanel />
         </>
-      ) : (
+      ) : !hasProbes ? (
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          このターゲットは Docker コンテナです。ハードウェア／ネットワーク／systemd ／ログのセクションは Phase 3 で対応予定です。
+          このターゲットには probe が設定されていません。`config/monitor.ts` の `probes` で HTTP / TCP の疎通確認を追加できます。
         </p>
-      )}
+      ) : null}
     </div>
   );
 }

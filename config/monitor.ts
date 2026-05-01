@@ -11,24 +11,36 @@ export const targets: Target[] = [
     kind: "docker",
     name: "lionframe Web (F/E)",
     containerName: "lionframe-web",
+    probes: [
+      { name: "HTTP /", type: "http", url: "http://localhost:3030/" },
+    ],
   },
   {
     id: "lionframe-postgres",
     kind: "docker",
     name: "lionframe Postgres",
     containerName: "lionframe-postgres",
+    probes: [
+      { name: "TCP 5433", type: "tcp", host: "localhost", port: 5433 },
+    ],
   },
   {
     id: "lionframe-airag",
     kind: "docker",
     name: "lionframe AI-RAG",
     containerName: "lionframe-airag-backend",
+    probes: [
+      { name: "HTTP /", type: "http", url: "http://localhost:8000/" },
+    ],
   },
   {
     id: "lionframe-openldap",
     kind: "docker",
     name: "lionframe OpenLDAP",
     containerName: "lionframe-openldap",
+    probes: [
+      { name: "TCP 389 (LDAP)", type: "tcp", host: "localhost", port: 389 },
+    ],
   },
 ];
 
@@ -70,6 +82,7 @@ export const monitorConfig = {
     status: 5000,
     health: 30000,
     services: 10000,
+    probes: 10000,
   },
 } as const;
 
