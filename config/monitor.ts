@@ -1,4 +1,4 @@
-import type { Target } from "@/lib/types";
+import type { Target, TargetLink } from "@/lib/types";
 
 // 監視対象（Target）の定義。
 // "host"   = 自ホスト（Next.js が稼働するマシン）。Phase 1 から対応。
@@ -43,6 +43,24 @@ export const targets: Target[] = [
     ],
   },
 ];
+
+// 概観ビュー（トポロジー）の設定。
+// positions: 各 target.id ごとの初期座標（自動レイアウトを使わない簡易表示）。
+// links: 監視対象同士の依存関係（例: web → postgres）。空のままでも動作する。
+//        実運用に合わせてユーザーが編集する想定。
+export const topologyConfig: {
+  positions: Record<string, { x: number; y: number }>;
+  links: TargetLink[];
+} = {
+  positions: {
+    local: { x: 40, y: 40 },
+    "lionframe-web": { x: 320, y: 40 },
+    "lionframe-airag": { x: 320, y: 200 },
+    "lionframe-postgres": { x: 600, y: 40 },
+    "lionframe-openldap": { x: 600, y: 200 },
+  },
+  links: [],
+};
 
 export const monitorConfig = {
   thresholds: {

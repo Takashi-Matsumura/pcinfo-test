@@ -1,11 +1,14 @@
 "use client";
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { StatusTable, type StatusRow } from "./StatusTable";
 import { PlainSummary } from "./PlainSummary";
 import { LogPanel } from "./LogPanel";
+import { ViewToggle, type ViewMode } from "./ViewToggle";
 import { monitorConfig, targets } from "@/config/monitor";
 import { summarize } from "@/lib/judge";
 import { useMuteList, type MuteCategory, type MuteList } from "@/app/hooks/useMuteList";
+import { usePolling } from "@/app/hooks/usePolling";
 import type {
   ContainerBasicResources,
   HealthResponse,
@@ -14,6 +17,18 @@ import type {
   Severity,
   StatusResponse,
 } from "@/lib/types";
+
+const TopologyView = dynamic(
+  () => import("./TopologyView").then((m) => m.TopologyView),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="text-xs text-zinc-500 dark:text-zinc-400">
+        トポロジーを読み込み中…
+      </div>
+    ),
+  },
+);
 
 function muteState(
   cat: MuteCategory,
@@ -702,52 +717,10 @@ function buildServiceCards(s: ServicesResponse, mute: MuteList): StatusRow[] {
   });
 }
 
-interface PollState<T> {
-  data: T | null;
-  error: string | null;
-  fails: number;
-  lastFetchedAt: number | null;
-}
-
-function usePolling<T>(url: string | null, intervalMs: number): PollState<T> {
-  const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [fails, setFails] = useState(0);
-  const [lastFetchedAt, setLastFetchedAt] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (url === null) return;
-    let alive = true;
-    let abort: AbortController | null = null;
-    const tick = async () => {
-      abort?.abort();
-      abort = new AbortController();
-      try {
-        const res = await fetch(url, { signal: abort.signal, cache: "no-store" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = (await res.json()) as T;
-        if (!alive) return;
-        setData(json);
-        setError(null);
-        setLastFetchedAt(Date.now());
-        setFails(0);
-      } catch (e) {
-        if (!alive) return;
-        if (e instanceof DOMException && e.name === "AbortError") return;
-        setFails((n) => n + 1);
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    };
-    tick();
-    const id = setInterval(tick, intervalMs);
-    return () => {
-      alive = false;
-      abort?.abort();
-      clearInterval(id);
-    };
-  }, [url, intervalMs]);
-
-  return { data, error, fails, lastFetchedAt };
+function readInitialView(): ViewMode {
+  if (typeof window === "undefined") return "detail";
+  const sp = new URLSearchParams(window.location.search);
+  return sp.get("view") === "topology" ? "topology" : "detail";
 }
 
 export function Dashboard() {
@@ -761,20 +734,32 @@ export function Dashboard() {
   const [activeTargetId, setActiveTargetId] = useState(
     () => targets[0]?.id ?? "local",
   );
+  const [view, setView] = useState<ViewMode>(readInitialView);
+  // view を URL searchParam に同期。リロード後も状態を保持。
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (view === "topology") url.searchParams.set("view", "topology");
+    else url.searchParams.delete("view");
+    window.history.replaceState(null, "", url.toString());
+  }, [view]);
+
   const activeTarget = targets.find((t) => t.id === activeTargetId) ?? targets[0];
   const isHost = activeTarget?.kind === "host";
   const targetQuery = `?target=${encodeURIComponent(activeTargetId)}`;
+  // 概観表示中は個別 polling を停止する（/api/overview のみで賄う）。
+  const detailActive = view === "detail";
 
   const status = usePolling<StatusResponse>(
-    `/api/status${targetQuery}`,
+    detailActive ? `/api/status${targetQuery}` : null,
     monitorConfig.refreshIntervalsMs.status,
   );
   const health = usePolling<HealthResponse>(
-    isHost ? `/api/health${targetQuery}` : null,
+    detailActive && isHost ? `/api/health${targetQuery}` : null,
     monitorConfig.refreshIntervalsMs.health,
   );
   const services = usePolling<ServicesResponse>(
-    isHost ? `/api/services${targetQuery}` : null,
+    detailActive && isHost ? `/api/services${targetQuery}` : null,
     monitorConfig.refreshIntervalsMs.services,
   );
   const hasProbes =
@@ -784,7 +769,7 @@ export function Dashboard() {
         ? activeTarget.probes.length > 0
         : false;
   const probes = usePolling<ProbesResponse>(
-    hasProbes ? `/api/probes${targetQuery}` : null,
+    detailActive && hasProbes ? `/api/probes${targetQuery}` : null,
     monitorConfig.refreshIntervalsMs.probes,
   );
 
@@ -818,23 +803,38 @@ export function Dashboard() {
         <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
           サーバ状態モニター
         </h1>
-        <div className="text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-3 flex-wrap">
-          {stale ? (
-            <span className="text-rose-600 dark:text-rose-400 font-medium">
-              サーバ応答なし（{status.fails} 回連続失敗）
-            </span>
-          ) : null}
-          {!stale && lastAgo !== null ? <span>最終取得 {lastAgo} 秒前</span> : null}
-          {statusData ? (
-            <span>
-              サーバ時刻 {new Date(statusData.serverTime).toLocaleTimeString("ja-JP")} ／ OS{" "}
-              <code className="font-mono">{statusData.platform}</code>
-            </span>
-          ) : null}
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-3 flex-wrap">
+            {detailActive && stale ? (
+              <span className="text-rose-600 dark:text-rose-400 font-medium">
+                サーバ応答なし（{status.fails} 回連続失敗）
+              </span>
+            ) : null}
+            {detailActive && !stale && lastAgo !== null ? (
+              <span>最終取得 {lastAgo} 秒前</span>
+            ) : null}
+            {detailActive && statusData ? (
+              <span>
+                サーバ時刻{" "}
+                {new Date(statusData.serverTime).toLocaleTimeString("ja-JP")} ／ OS{" "}
+                <code className="font-mono">{statusData.platform}</code>
+              </span>
+            ) : null}
+          </div>
+          <ViewToggle value={view} onChange={setView} />
         </div>
       </header>
 
-      {targets.length > 1 ? (
+      {view === "topology" ? (
+        <TopologyView
+          onSelectTarget={(id) => {
+            setActiveTargetId(id);
+            setView("detail");
+          }}
+        />
+      ) : null}
+
+      {view === "detail" && targets.length > 1 ? (
         <nav className="flex flex-wrap gap-2 -mb-2" aria-label="監視ターゲット">
           {targets.map((t) => {
             const active = t.id === activeTargetId;
@@ -857,7 +857,7 @@ export function Dashboard() {
         </nav>
       ) : null}
 
-      {activeTarget ? (
+      {view === "detail" && activeTarget ? (
         <span className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded ring-1 ring-zinc-200 dark:ring-zinc-700 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200">
           <span className="text-zinc-400 dark:text-zinc-500">ターゲット</span>
           <span className="font-medium">{activeTarget.name}</span>
@@ -872,7 +872,7 @@ export function Dashboard() {
         </span>
       ) : null}
 
-      {summary ? (
+      {view === "detail" && summary ? (
         <PlainSummary
           severity={stale ? "unknown" : summary.overall}
           message={
@@ -888,14 +888,16 @@ export function Dashboard() {
         />
       ) : null}
 
-      <StatusTable
-        title="基本リソース"
-        rows={statusData ? buildBasicCards(statusData, muteList) : []}
-        emptyMessage={status.error ? `取得失敗: ${status.error}` : "読み込み中…"}
-        onToggleMute={toggleMute}
-      />
+      {view === "detail" ? (
+        <StatusTable
+          title="基本リソース"
+          rows={statusData ? buildBasicCards(statusData, muteList) : []}
+          emptyMessage={status.error ? `取得失敗: ${status.error}` : "読み込み中…"}
+          onToggleMute={toggleMute}
+        />
+      ) : null}
 
-      {hasProbes ? (
+      {view === "detail" && hasProbes ? (
         <StatusTable
           title="サービス疎通"
           rows={probesData ? buildProbeCards(probesData) : []}
@@ -903,7 +905,7 @@ export function Dashboard() {
         />
       ) : null}
 
-      {isHost ? (
+      {view === "detail" && isHost ? (
         <>
           <StatusTable
             title="ハードウェア健全性"
@@ -934,7 +936,7 @@ export function Dashboard() {
 
           <LogPanel />
         </>
-      ) : !hasProbes ? (
+      ) : view === "detail" && !hasProbes ? (
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
           このターゲットには probe が設定されていません。`config/monitor.ts` の `probes` で HTTP / TCP の疎通確認を追加できます。
         </p>

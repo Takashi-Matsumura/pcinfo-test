@@ -234,3 +234,30 @@ export interface ProbesResponse {
   target: TargetRef;
   probes: CollectorResult<ProbeResult[]>;
 }
+
+export interface TargetLink {
+  from: string;
+  to: string;
+  label?: string;
+}
+
+export type OverviewCategory = "hardware" | "software" | "network" | "security";
+export type OverviewGrade = "excellent" | "good" | "caution" | "critical";
+
+export interface TargetOverview {
+  ref: TargetRef;
+  severity: Severity;
+  grade: OverviewGrade;
+  gradeLabel: string;
+  score: number;
+  primary: OverviewCategory | null;
+  message: string;
+  error?: string;
+}
+
+export interface OverviewResponse {
+  serverTime: string;
+  platform: NodeJS.Platform;
+  targets: TargetOverview[];
+  links: TargetLink[];
+}
