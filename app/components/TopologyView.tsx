@@ -12,8 +12,16 @@ import {
 } from "@xyflow/react";
 import { topologyConfig } from "@/config/monitor";
 import { usePolling } from "@/app/hooks/usePolling";
+import { summarize } from "@/lib/judge";
 import { TargetNode, type TargetNodeData } from "./TargetNode";
-import type { OverviewResponse } from "@/lib/types";
+import type { MuteList } from "@/app/hooks/useMuteList";
+import type {
+  BasicData,
+  CollectorResult,
+  OverviewResponse,
+  TargetCollected,
+  TargetOverview,
+} from "@/lib/types";
 
 const CATEGORY_LABEL: Record<string, string> = {
   hardware: "ハードウェア",
@@ -28,10 +36,64 @@ const FALLBACK_X = 40;
 const FALLBACK_Y = 40;
 const SPACING = 220;
 
+// 詳細ビューと同じ summarize() を呼び、muteList を加味して集計する。
+// サーバ側で集計するとユーザーごとの mute が反映されないため、必ずクライアントで集計する。
+function buildOverview(t: TargetCollected, muteList: MuteList): TargetOverview {
+  if (t.error) {
+    return {
+      ref: t.ref,
+      severity: "unknown",
+      grade: "caution",
+      gradeLabel: "取得不可",
+      score: 0,
+      primary: null,
+      message: "概観の取得に失敗しました",
+      error: t.error,
+    };
+  }
+  // service kind は basic を持たないので、判定対象外のダミー host を使う。
+  const collectedAt = new Date().toISOString();
+  const dummyErr = <T,>(): CollectorResult<T> => ({
+    ok: false,
+    error: "n/a",
+    reason: "other",
+    collectedAt,
+  });
+  const basic: BasicData =
+    t.basic ??
+    ({
+      kind: "host",
+      cpu: dummyErr(),
+      mem: dummyErr(),
+      load: dummyErr(),
+      uptime: dummyErr(),
+      disk: dummyErr(),
+      netLink: dummyErr(),
+    } as BasicData);
+  const s = summarize({
+    basic,
+    health: t.health,
+    services: t.services,
+    probes: t.probes,
+    userIgnore: muteList,
+  });
+  return {
+    ref: t.ref,
+    severity: s.overall,
+    grade: s.grade,
+    gradeLabel: s.gradeLabel,
+    score: s.score,
+    primary: s.primary,
+    message: s.message,
+  };
+}
+
 export function TopologyView({
   onSelectTarget,
+  muteList,
 }: {
   onSelectTarget: (id: string) => void;
+  muteList: MuteList;
 }) {
   const overview = usePolling<OverviewResponse>("/api/overview", 30000);
 
@@ -41,7 +103,8 @@ export function TopologyView({
   }>(() => {
     const data = overview.data;
     if (!data) return { nodes: [], edges: [] };
-    const nodes: Node[] = data.targets.map((o, i) => {
+    const summaries = data.targets.map((t) => buildOverview(t, muteList));
+    const nodes: Node[] = summaries.map((o, i) => {
       const pos =
         topologyConfig.positions[o.ref.id] ?? {
           x: FALLBACK_X + (i % 4) * SPACING,
@@ -74,7 +137,7 @@ export function TopologyView({
       style: { stroke: "#a1a1aa" },
     }));
     return { nodes, edges };
-  }, [overview.data]);
+  }, [overview.data, muteList]);
 
   const onNodeClick: NodeMouseHandler = (_e, node) => {
     onSelectTarget(node.id);

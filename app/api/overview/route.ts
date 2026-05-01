@@ -1,6 +1,7 @@
 import "server-only";
 import { NextResponse } from "next/server";
-import { monitorConfig, topologyConfig } from "@/config/monitor";
+import { monitorConfig } from "@/config/monitor";
+import { topologyConfig } from "@/config/monitor";
 import { listTargets, targetRef } from "@/lib/targets";
 import { collectCpu } from "@/lib/collectors/cpu";
 import { collectMem } from "@/lib/collectors/mem";
@@ -18,13 +19,12 @@ import { collectServices } from "@/lib/collectors/services";
 import { collectDockerStats } from "@/lib/collectors/docker";
 import { runProbes } from "@/lib/probes";
 import { mockBasicResources, mockHealth, mockServices } from "@/lib/collectors/mock";
-import { summarize } from "@/lib/judge";
 import type {
   BasicData,
   HardwareNetwork,
   OverviewResponse,
   Target,
-  TargetOverview,
+  TargetCollected,
 } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -61,7 +61,7 @@ async function collectHostHealth(): Promise<HardwareNetwork> {
   return { sensors, smart, gateway, dns, ping, copyfail };
 }
 
-async function summarizeTarget(target: Target): Promise<TargetOverview> {
+async function collectTarget(target: Target): Promise<TargetCollected> {
   const useMock = process.env.MONITOR_DEV_MOCK === "1";
   const ref = targetRef(target);
   try {
@@ -74,16 +74,7 @@ async function summarizeTarget(target: Target): Promise<TargetOverview> {
           ? Promise.resolve(mockServices())
           : collectServices(monitorConfig.services),
       ]);
-      const s = summarize({ basic, health, services });
-      return {
-        ref,
-        severity: s.overall,
-        grade: s.grade,
-        gradeLabel: s.gradeLabel,
-        score: s.score,
-        primary: s.primary,
-        message: s.message,
-      };
+      return { ref, basic, health, services };
     }
     if (target.kind === "docker") {
       const docker = await collectDockerStats(target.containerName);
@@ -94,16 +85,7 @@ async function summarizeTarget(target: Target): Promise<TargetOverview> {
         list.length === 0
           ? { ok: true as const, value: [], collectedAt }
           : { ok: true as const, value: await runProbes(list), collectedAt };
-      const s = summarize({ basic, probes });
-      return {
-        ref,
-        severity: s.overall,
-        grade: s.grade,
-        gradeLabel: s.gradeLabel,
-        score: s.score,
-        primary: s.primary,
-        message: s.message,
-      };
+      return { ref, basic, probes };
     }
     // service kind: probes のみ
     const collectedAt = new Date().toISOString();
@@ -111,35 +93,10 @@ async function summarizeTarget(target: Target): Promise<TargetOverview> {
       target.probes.length === 0
         ? { ok: true as const, value: [], collectedAt }
         : { ok: true as const, value: await runProbes(target.probes), collectedAt };
-    // service kind は basic を持たないので、ダミーで host 0% を渡す
-    const basic: BasicData = {
-      kind: "host",
-      cpu: { ok: false, error: "n/a", reason: "other", collectedAt },
-      mem: { ok: false, error: "n/a", reason: "other", collectedAt },
-      load: { ok: false, error: "n/a", reason: "other", collectedAt },
-      uptime: { ok: false, error: "n/a", reason: "other", collectedAt },
-      disk: { ok: false, error: "n/a", reason: "other", collectedAt },
-      netLink: { ok: false, error: "n/a", reason: "other", collectedAt },
-    };
-    const s = summarize({ basic, probes });
-    return {
-      ref,
-      severity: s.overall,
-      grade: s.grade,
-      gradeLabel: s.gradeLabel,
-      score: s.score,
-      primary: s.primary,
-      message: s.message,
-    };
+    return { ref, probes };
   } catch (e) {
     return {
       ref,
-      severity: "unknown",
-      grade: "caution",
-      gradeLabel: "取得不可",
-      score: 0,
-      primary: null,
-      message: "概観の取得に失敗しました",
       error: e instanceof Error ? e.message : String(e),
     };
   }
@@ -147,11 +104,11 @@ async function summarizeTarget(target: Target): Promise<TargetOverview> {
 
 export async function GET() {
   const targets = listTargets();
-  const overviews = await Promise.all(targets.map((t) => summarizeTarget(t)));
+  const collected = await Promise.all(targets.map((t) => collectTarget(t)));
   const body: OverviewResponse = {
     serverTime: new Date().toISOString(),
     platform: process.platform,
-    targets: overviews,
+    targets: collected,
     links: topologyConfig.links,
   };
   return NextResponse.json(body, {
