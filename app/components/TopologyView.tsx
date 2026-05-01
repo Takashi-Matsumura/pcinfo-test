@@ -101,6 +101,8 @@ export function TopologyView({
           fitView
           fitViewOptions={{ padding: 0.2 }}
           proOptions={{ hideAttribution: true }}
+          nodesConnectable={false}
+          edgesReconnectable={false}
         >
           <Background gap={20} size={1} color="#d4d4d8" />
           <Controls showInteractive={false} />
