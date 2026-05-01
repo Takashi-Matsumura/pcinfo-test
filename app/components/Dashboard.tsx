@@ -3,10 +3,11 @@ import { useEffect, useState } from "react";
 import { StatusTable, type StatusRow } from "./StatusTable";
 import { PlainSummary } from "./PlainSummary";
 import { LogPanel } from "./LogPanel";
-import { monitorConfig } from "@/config/monitor";
+import { monitorConfig, targets } from "@/config/monitor";
 import { summarize } from "@/lib/judge";
 import { useMuteList, type MuteCategory, type MuteList } from "@/app/hooks/useMuteList";
 import type {
+  ContainerBasicResources,
   HealthResponse,
   ServicesResponse,
   Severity,
@@ -54,6 +55,163 @@ function sevByPercent(p: number, warn: number, crit: number): Severity {
 }
 
 function buildBasicCards(data: StatusResponse, mute: MuteList): StatusRow[] {
+  if (data.basic.kind === "docker") {
+    return buildContainerBasicCards(data.basic);
+  }
+  return buildHostBasicCards(data, mute);
+}
+
+function fmtBytesShort(n: number): string {
+  return fmtBytes(n);
+}
+
+function buildContainerBasicCards(c: ContainerBasicResources): StatusRow[] {
+  const t = monitorConfig.thresholds;
+  const cards: StatusRow[] = [];
+
+  if (c.state.ok) {
+    const v = c.state.value;
+    const sev: Severity = v.running
+      ? v.health === "unhealthy"
+        ? "critical"
+        : v.health === "starting"
+          ? "warn"
+          : "ok"
+      : v.status === "exited"
+        ? "critical"
+        : "warn";
+    cards.push({
+      id: "container-state",
+      title: "コンテナ状態",
+      severity: sev,
+      primary: v.running ? "起動中" : v.status,
+      secondary: v.health
+        ? `health: ${v.health}`
+        : v.exitCode !== null && !v.running
+          ? `exit ${v.exitCode}`
+          : undefined,
+      hint: v.running
+        ? "コンテナが正常に動作中。health チェックがあれば併せて確認。"
+        : "停止／再起動中のコンテナ。docker logs で原因を確認してください。",
+    });
+  } else {
+    cards.push({
+      id: "container-state",
+      title: "コンテナ状態",
+      severity: "unknown",
+      primary: "取得不可",
+      secondary: c.state.error,
+    });
+  }
+
+  if (c.cpu.ok) {
+    const p = c.cpu.value.usagePercent;
+    cards.push({
+      id: "cpu",
+      title: "CPU 使用率",
+      severity: sevByPercent(p, t.cpuPercent.warn, t.cpuPercent.critical),
+      primary: `${p.toFixed(1)} %`,
+      secondary: `online CPU ${c.cpu.value.onlineCpus}`,
+      hint: "コンテナ内プロセスの CPU 消費。100% を超える場合はマルチコアで複数コア消費中。",
+    });
+  } else {
+    cards.push({
+      id: "cpu",
+      title: "CPU 使用率",
+      severity: "unknown",
+      primary: "—",
+      secondary: c.cpu.error,
+    });
+  }
+
+  if (c.mem.ok) {
+    const m = c.mem.value;
+    cards.push({
+      id: "mem",
+      title: "メモリ",
+      severity: sevByPercent(m.usagePercent, t.memPercent.warn, t.memPercent.critical),
+      primary: `${m.usagePercent.toFixed(0)} %`,
+      secondary: `${fmtBytesShort(m.usedBytes)} / ${fmtBytesShort(m.limitBytes)}`,
+      hint: "limit に近い場合は OOMKill のリスク。docker run --memory で制限を見直すか、アプリ側で改善。",
+    });
+  } else {
+    cards.push({
+      id: "mem",
+      title: "メモリ",
+      severity: "unknown",
+      primary: "—",
+      secondary: c.mem.error,
+    });
+  }
+
+  if (c.uptime.ok) {
+    const boot = new Date(c.uptime.value.startedAt).toLocaleString("ja-JP");
+    cards.push({
+      id: "uptime",
+      title: "アップタイム",
+      severity: "ok",
+      primary: fmtUptime(c.uptime.value.uptimeSeconds),
+      secondary: `起動 ${boot}`,
+      hint: "短すぎる場合は再起動ループの可能性。restarts と併せて確認。",
+    });
+  } else {
+    cards.push({
+      id: "uptime",
+      title: "アップタイム",
+      severity: "unknown",
+      primary: "—",
+      secondary: c.uptime.error,
+    });
+  }
+
+  if (c.network.ok) {
+    cards.push({
+      id: "network",
+      title: "ネットワーク累計",
+      severity: "ok",
+      primary: `↓ ${fmtBytesShort(c.network.value.rxBytes)} / ↑ ${fmtBytesShort(c.network.value.txBytes)}`,
+      secondary: "起動以降の累積バイト数",
+      hint: "短時間で激増している場合はトラフィック異常を疑う。",
+    });
+  } else {
+    cards.push({
+      id: "network",
+      title: "ネットワーク累計",
+      severity: "unknown",
+      primary: "—",
+      secondary: c.network.error,
+    });
+  }
+
+  if (c.restarts.ok) {
+    const n = c.restarts.value.count;
+    cards.push({
+      id: "restarts",
+      title: "再起動回数",
+      severity: n >= 5 ? "warn" : "ok",
+      primary: `${n} 回`,
+      hint:
+        n > 0
+          ? "再起動が発生しています。docker logs / health check の失敗履歴を確認。"
+          : undefined,
+    });
+  }
+
+  if (c.image.ok) {
+    cards.push({
+      id: "image",
+      title: "イメージ",
+      severity: "ok",
+      primary: c.image.value.image,
+      secondary: c.image.value.imageId.replace(/^sha256:/, "").slice(0, 12),
+    });
+  }
+
+  return cards;
+}
+
+function buildHostBasicCards(data: StatusResponse, mute: MuteList): StatusRow[] {
+  if (data.basic.kind !== "host") return [];
   const cards: StatusRow[] = [];
   const t = monitorConfig.thresholds;
   const { cpu, mem, load, uptime, disk, netLink } = data.basic;
@@ -509,13 +667,14 @@ interface PollState<T> {
   lastFetchedAt: number | null;
 }
 
-function usePolling<T>(url: string, intervalMs: number): PollState<T> {
+function usePolling<T>(url: string | null, intervalMs: number): PollState<T> {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fails, setFails] = useState(0);
   const [lastFetchedAt, setLastFetchedAt] = useState<number | null>(null);
 
   useEffect(() => {
+    if (url === null) return;
     let alive = true;
     let abort: AbortController | null = null;
     const tick = async () => {
@@ -557,19 +716,32 @@ export function Dashboard() {
   }, []);
 
   const { muteList, toggleMute } = useMuteList();
+  const [activeTargetId, setActiveTargetId] = useState(
+    () => targets[0]?.id ?? "local",
+  );
+  const activeTarget = targets.find((t) => t.id === activeTargetId) ?? targets[0];
+  const isHost = activeTarget?.kind === "host";
+  const targetQuery = `?target=${encodeURIComponent(activeTargetId)}`;
 
   const status = usePolling<StatusResponse>(
-    "/api/status",
+    `/api/status${targetQuery}`,
     monitorConfig.refreshIntervalsMs.status,
   );
   const health = usePolling<HealthResponse>(
-    "/api/health",
+    isHost ? `/api/health${targetQuery}` : null,
     monitorConfig.refreshIntervalsMs.health,
   );
   const services = usePolling<ServicesResponse>(
-    "/api/services",
+    isHost ? `/api/services${targetQuery}` : null,
     monitorConfig.refreshIntervalsMs.services,
   );
+
+  // ターゲット切替直後の古い状態でセクションを描かないためのガード。
+  const matchesTarget = <T extends { target: { id: string } }>(d: T | null) =>
+    d && d.target.id === activeTargetId ? d : null;
+  const statusData = matchesTarget(status.data);
+  const healthData = isHost ? matchesTarget(health.data) : null;
+  const servicesData = isHost ? matchesTarget(services.data) : null;
 
   const stale = status.error !== null && status.fails >= 3;
   const lastAgo =
@@ -577,11 +749,11 @@ export function Dashboard() {
       ? Math.floor((now - status.lastFetchedAt) / 1000)
       : null;
 
-  const summary = status.data
+  const summary = statusData
     ? summarize({
-        basic: status.data.basic,
-        health: health.data?.health,
-        services: services.data?.services,
+        basic: statusData.basic,
+        health: healthData?.health,
+        services: servicesData?.services,
         userIgnore: muteList,
       })
     : null;
@@ -589,20 +761,9 @@ export function Dashboard() {
   return (
     <div className="space-y-6">
       <header className="flex items-baseline justify-between flex-wrap gap-3">
-        <div className="flex items-baseline gap-3 flex-wrap">
-          <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
-            サーバ状態モニター
-          </h1>
-          {status.data?.target ? (
-            <span className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded ring-1 ring-zinc-200 dark:ring-zinc-700 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200">
-              <span className="text-zinc-400 dark:text-zinc-500">ターゲット</span>
-              <span className="font-medium">{status.data.target.name}</span>
-              <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono">
-                {status.data.target.kind}
-              </span>
-            </span>
-          ) : null}
-        </div>
+        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
+          サーバ状態モニター
+        </h1>
         <div className="text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-3 flex-wrap">
           {stale ? (
             <span className="text-rose-600 dark:text-rose-400 font-medium">
@@ -610,14 +771,52 @@ export function Dashboard() {
             </span>
           ) : null}
           {!stale && lastAgo !== null ? <span>最終取得 {lastAgo} 秒前</span> : null}
-          {status.data ? (
+          {statusData ? (
             <span>
-              サーバ時刻 {new Date(status.data.serverTime).toLocaleTimeString("ja-JP")} ／ OS{" "}
-              <code className="font-mono">{status.data.platform}</code>
+              サーバ時刻 {new Date(statusData.serverTime).toLocaleTimeString("ja-JP")} ／ OS{" "}
+              <code className="font-mono">{statusData.platform}</code>
             </span>
           ) : null}
         </div>
       </header>
+
+      {targets.length > 1 ? (
+        <nav className="flex flex-wrap gap-2 -mb-2" aria-label="監視ターゲット">
+          {targets.map((t) => {
+            const active = t.id === activeTargetId;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setActiveTargetId(t.id)}
+                className={`text-xs px-3 py-1.5 rounded-md ring-1 transition-colors ${
+                  active
+                    ? "ring-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-medium"
+                    : "ring-zinc-200 dark:ring-zinc-700 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                }`}
+              >
+                {t.name}
+                <span className="ml-1.5 text-[10px] opacity-60 font-mono">{t.kind}</span>
+              </button>
+            );
+          })}
+        </nav>
+      ) : null}
+
+      {activeTarget ? (
+        <span className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded ring-1 ring-zinc-200 dark:ring-zinc-700 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200">
+          <span className="text-zinc-400 dark:text-zinc-500">ターゲット</span>
+          <span className="font-medium">{activeTarget.name}</span>
+          <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono">
+            {activeTarget.kind}
+          </span>
+          {activeTarget.kind === "docker" ? (
+            <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono">
+              ({activeTarget.containerName})
+            </span>
+          ) : null}
+        </span>
+      ) : null}
 
       {summary ? (
         <PlainSummary
@@ -637,39 +836,47 @@ export function Dashboard() {
 
       <StatusTable
         title="基本リソース"
-        rows={status.data ? buildBasicCards(status.data, muteList) : []}
+        rows={statusData ? buildBasicCards(statusData, muteList) : []}
         emptyMessage={status.error ? `取得失敗: ${status.error}` : "読み込み中…"}
         onToggleMute={toggleMute}
       />
 
-      <StatusTable
-        title="ハードウェア健全性"
-        rows={health.data ? buildHardwareCards(health.data, muteList) : []}
-        emptyMessage={health.error ? `取得失敗: ${health.error}` : "読み込み中…"}
-        onToggleMute={toggleMute}
-      />
+      {isHost ? (
+        <>
+          <StatusTable
+            title="ハードウェア健全性"
+            rows={healthData ? buildHardwareCards(healthData, muteList) : []}
+            emptyMessage={health.error ? `取得失敗: ${health.error}` : "読み込み中…"}
+            onToggleMute={toggleMute}
+          />
 
-      <StatusTable
-        title="ネットワーク疎通"
-        rows={health.data ? buildNetworkCards(health.data, muteList) : []}
-        emptyMessage={health.error ? `取得失敗: ${health.error}` : "読み込み中…"}
-        onToggleMute={toggleMute}
-      />
+          <StatusTable
+            title="ネットワーク疎通"
+            rows={healthData ? buildNetworkCards(healthData, muteList) : []}
+            emptyMessage={health.error ? `取得失敗: ${health.error}` : "読み込み中…"}
+            onToggleMute={toggleMute}
+          />
 
-      <StatusTable
-        title="カーネルセキュリティ"
-        rows={health.data ? buildSecurityCards(health.data) : []}
-        emptyMessage={health.error ? `取得失敗: ${health.error}` : "読み込み中…"}
-      />
+          <StatusTable
+            title="カーネルセキュリティ"
+            rows={healthData ? buildSecurityCards(healthData) : []}
+            emptyMessage={health.error ? `取得失敗: ${health.error}` : "読み込み中…"}
+          />
 
-      <StatusTable
-        title="systemd サービス"
-        rows={services.data ? buildServiceCards(services.data, muteList) : []}
-        emptyMessage={services.error ? `取得失敗: ${services.error}` : "読み込み中…"}
-        onToggleMute={toggleMute}
-      />
+          <StatusTable
+            title="systemd サービス"
+            rows={servicesData ? buildServiceCards(servicesData, muteList) : []}
+            emptyMessage={services.error ? `取得失敗: ${services.error}` : "読み込み中…"}
+            onToggleMute={toggleMute}
+          />
 
-      <LogPanel />
+          <LogPanel />
+        </>
+      ) : (
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+          このターゲットは Docker コンテナです。ハードウェア／ネットワーク／systemd ／ログのセクションは Phase 3 で対応予定です。
+        </p>
+      )}
     </div>
   );
 }

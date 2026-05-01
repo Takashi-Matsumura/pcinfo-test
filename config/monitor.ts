@@ -1,10 +1,35 @@
 import type { Target } from "@/lib/types";
 
 // 監視対象（Target）の定義。
-// Phase 1 では "host" のみ対応（自ホスト=Next.js が稼働するマシン）。
-// Phase 2 で "docker"、Phase 3 で "service" probe を追加予定。
+// "host"   = 自ホスト（Next.js が稼働するマシン）。Phase 1 から対応。
+// "docker" = Docker コンテナ。Phase 2 から対応。/var/run/docker.sock を読む。
+// "service" = HTTP/TCP probe 等。Phase 3 で対応予定。
 export const targets: Target[] = [
   { id: "local", kind: "host", name: "このホスト" },
+  {
+    id: "lionframe-web",
+    kind: "docker",
+    name: "lionframe Web (F/E)",
+    containerName: "lionframe-web",
+  },
+  {
+    id: "lionframe-postgres",
+    kind: "docker",
+    name: "lionframe Postgres",
+    containerName: "lionframe-postgres",
+  },
+  {
+    id: "lionframe-airag",
+    kind: "docker",
+    name: "lionframe AI-RAG",
+    containerName: "lionframe-airag-backend",
+  },
+  {
+    id: "lionframe-openldap",
+    kind: "docker",
+    name: "lionframe OpenLDAP",
+    containerName: "lionframe-openldap",
+  },
 ];
 
 export const monitorConfig = {

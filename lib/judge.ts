@@ -1,6 +1,6 @@
 import { monitorConfig } from "@/config/monitor";
 import type {
-  BasicResources,
+  BasicData,
   CollectorResult,
   HardwareNetwork,
   ServiceState,
@@ -79,7 +79,7 @@ export interface UserIgnore {
 }
 
 export interface SummarizeInput {
-  basic: BasicResources;
+  basic: BasicData;
   health?: HardwareNetwork;
   services?: CollectorResult<ServiceState[]>;
   userIgnore?: UserIgnore;
@@ -145,7 +145,7 @@ export function summarize({
     }
   };
 
-  // ----- basic -----
+  // ----- basic (host or docker) -----
   if (basic.cpu.ok) {
     const p = basic.cpu.value.usagePercent;
     if (p >= t.cpuPercent.critical) note("software", "critical", `CPU ${p.toFixed(0)}%`);
@@ -156,30 +156,48 @@ export function summarize({
     if (p >= t.memPercent.critical) note("software", "critical", `メモリ ${p.toFixed(0)}%`);
     else if (p >= t.memPercent.warn) note("software", "warn", `メモリ ${p.toFixed(0)}%`);
   }
-  if (basic.load.ok) {
-    const cores = Math.max(1, basic.load.value.cores);
-    const perCore = basic.load.value["1m"] / cores;
-    if (perCore >= t.loadPerCore.critical)
-      note("software", "critical", `Load/コア ${perCore.toFixed(2)}`);
-    else if (perCore >= t.loadPerCore.warn)
-      note("software", "warn", `Load/コア ${perCore.toFixed(2)}`);
-  }
-  if (basic.disk.ok) {
-    for (const d of basic.disk.value) {
-      if (ignore.diskMounts.includes(d.mount)) continue;
-      const p = d.usagePercent;
-      if (p >= t.diskPercent.critical)
-        note("software", "critical", `ディスク ${d.mount} ${p.toFixed(0)}%`);
-      else if (p >= t.diskPercent.warn)
-        note("software", "warn", `ディスク ${d.mount} ${p.toFixed(0)}%`);
+
+  if (basic.kind === "docker") {
+    if (basic.state.ok) {
+      const v = basic.state.value;
+      if (!v.running) {
+        note("software", "critical", `コンテナ停止中（${v.status}）`);
+      } else if (v.health === "unhealthy") {
+        note("software", "critical", "health チェック failure");
+      } else if (v.health === "starting") {
+        note("software", "warn", "health チェック起動中");
+      }
     }
-  }
-  if (basic.netLink.ok) {
-    for (const n of basic.netLink.value) {
-      if (ignore.interfaces.includes(n.name)) continue;
-      if (n.operstate === "down" || n.carrier === 0) {
-        note("hardware", "warn", `NIC ${n.name} リンク無し`);
-        note("network", "warn", `NIC ${n.name} リンク無し`);
+    if (basic.restarts.ok && basic.restarts.value.count >= 5) {
+      note("software", "warn", `再起動 ${basic.restarts.value.count} 回`);
+    }
+  } else {
+    // host 専用
+    if (basic.load.ok) {
+      const cores = Math.max(1, basic.load.value.cores);
+      const perCore = basic.load.value["1m"] / cores;
+      if (perCore >= t.loadPerCore.critical)
+        note("software", "critical", `Load/コア ${perCore.toFixed(2)}`);
+      else if (perCore >= t.loadPerCore.warn)
+        note("software", "warn", `Load/コア ${perCore.toFixed(2)}`);
+    }
+    if (basic.disk.ok) {
+      for (const d of basic.disk.value) {
+        if (ignore.diskMounts.includes(d.mount)) continue;
+        const p = d.usagePercent;
+        if (p >= t.diskPercent.critical)
+          note("software", "critical", `ディスク ${d.mount} ${p.toFixed(0)}%`);
+        else if (p >= t.diskPercent.warn)
+          note("software", "warn", `ディスク ${d.mount} ${p.toFixed(0)}%`);
+      }
+    }
+    if (basic.netLink.ok) {
+      for (const n of basic.netLink.value) {
+        if (ignore.interfaces.includes(n.name)) continue;
+        if (n.operstate === "down" || n.carrier === 0) {
+          note("hardware", "warn", `NIC ${n.name} リンク無し`);
+          note("network", "warn", `NIC ${n.name} リンク無し`);
+        }
       }
     }
   }

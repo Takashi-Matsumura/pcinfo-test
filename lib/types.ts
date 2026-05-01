@@ -75,11 +75,37 @@ export interface BasicResources {
   netLink: CollectorResult<NetLinkEntry[]>;
 }
 
+export interface ContainerState {
+  status: string;
+  running: boolean;
+  startedAt: string | null;
+  exitCode: number | null;
+  health: string | null;
+}
+
+export interface ContainerBasicResources {
+  cpu: CollectorResult<{ usagePercent: number; onlineCpus: number }>;
+  mem: CollectorResult<{
+    usedBytes: number;
+    limitBytes: number;
+    usagePercent: number;
+  }>;
+  state: CollectorResult<ContainerState>;
+  uptime: CollectorResult<{ uptimeSeconds: number; startedAt: string }>;
+  network: CollectorResult<{ rxBytes: number; txBytes: number }>;
+  restarts: CollectorResult<{ count: number }>;
+  image: CollectorResult<{ image: string; imageId: string }>;
+}
+
+export type BasicData =
+  | ({ kind: "host" } & BasicResources)
+  | ({ kind: "docker" } & ContainerBasicResources);
+
 export interface StatusResponse {
   serverTime: string;
   platform: NodeJS.Platform;
   target: TargetRef;
-  basic: BasicResources;
+  basic: BasicData;
 }
 
 export interface TempReading {

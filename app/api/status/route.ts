@@ -7,14 +7,15 @@ import { collectLoad } from "@/lib/collectors/load";
 import { collectUptime } from "@/lib/collectors/uptime";
 import { collectDisk } from "@/lib/collectors/disk";
 import { collectNetLink } from "@/lib/collectors/net-link";
+import { collectDockerStats } from "@/lib/collectors/docker";
 import { mockBasicResources } from "@/lib/collectors/mock";
-import { resolveHostTarget, targetRef } from "@/lib/targets";
-import type { BasicResources, StatusResponse } from "@/lib/types";
+import { resolveTarget, targetRef } from "@/lib/targets";
+import type { BasicData, BasicResources, StatusResponse } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-async function collectBasic(): Promise<BasicResources> {
+async function collectHostBasic(): Promise<BasicResources> {
   const [cpu, mem, load, uptime, disk, netLink] = await Promise.all([
     collectCpu(),
     collectMem(),
@@ -30,17 +31,32 @@ async function collectBasic(): Promise<BasicResources> {
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
-  const r = resolveHostTarget(url.searchParams);
+  const r = resolveTarget(url.searchParams);
   if (!r.ok) {
     return NextResponse.json({ error: r.message }, { status: r.status });
   }
+  const target = r.target;
 
   const useMock = process.env.MONITOR_DEV_MOCK === "1";
-  const basic = useMock ? mockBasicResources() : await collectBasic();
+  let basic: BasicData;
+
+  if (target.kind === "host") {
+    const host = useMock ? mockBasicResources() : await collectHostBasic();
+    basic = { kind: "host", ...host };
+  } else if (target.kind === "docker") {
+    const docker = await collectDockerStats(target.containerName);
+    basic = { kind: "docker", ...docker };
+  } else {
+    return NextResponse.json(
+      { error: `target kind "${target.kind}" は未対応` },
+      { status: 501 },
+    );
+  }
+
   const body: StatusResponse = {
     serverTime: new Date().toISOString(),
     platform: process.platform,
-    target: targetRef(r.target),
+    target: targetRef(target),
     basic,
   };
   return NextResponse.json(body, {
