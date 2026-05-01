@@ -62,12 +62,14 @@ export function TargetNode({ data, selected }: NodeProps) {
       <Handle
         type="target"
         position={Position.Left}
-        className="!bg-zinc-400 dark:!bg-zinc-600"
+        isConnectable={false}
+        className="!opacity-0 !pointer-events-none"
       />
       <Handle
         type="source"
         position={Position.Right}
-        className="!bg-zinc-400 dark:!bg-zinc-600"
+        isConnectable={false}
+        className="!opacity-0 !pointer-events-none"
       />
       <div className="px-3 py-2 space-y-1.5">
         <div className="flex items-center justify-between gap-2">
